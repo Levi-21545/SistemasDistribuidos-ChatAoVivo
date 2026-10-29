@@ -1,0 +1,11 @@
+id,frente,tarefa,estado,participantes,dependencias,marco,criterio_conclusao,evidencia
+T01,coordenação e eleição,Revisar a direção e fechar o protocolo inicial com o grupo,em_revisao,,,2026-10-28,"Bootstrap, envelopes, corte de visão e confirmação revisados pelos integrantes",docs/protocolo.tex; docs/relatorio.tex (esboços; revisão do grupo pendente)
+T02,comunicação e descoberta,Executar nós com descoberta e transporte FIFO com retry,pendente,,T01,2026-10-28,Dois nós em contêineres trocam JSON usando nomes configurados; retry não repete efeitos,
+T03,"ordenação, replicação e recuperação",Implementar MSG/ACK e Lamport em visão fixa,pendente,,T02,2026-11-04,Três nós entregam a mesma sequência sob envios concorrentes e pacotes repetidos,
+T04,coordenação e eleição,Implementar heartbeat e Bully com estados e época,pendente,,T02,2026-11-04,Queda do líder inicia eleição; nós sincronizando não participam; eleição não libera envios sozinha,
+T05,"ordenação, replicação e recuperação",Reconciliar histórico e instalar a visão após uma queda,pendente,,T03;T04,2026-11-11,"No cenário suportado, mensagens confirmadas são preservadas e os sobreviventes retomam com históricos iguais",
+T06,"ordenação, replicação e recuperação",Sincronizar o retorno de um nó por JOIN/SNAPSHOT,pendente,,T05,2026-11-11,Nó reiniciado recebe histórico e UUIDs entregues antes de entrar; reenvio não duplica mensagem,
+T07,"cliente, reprodução e experimentos",Integrar cliente web e reconexão preservando UUID,pendente,,T03;T05,2026-11-18,Clientes em nós distintos conversam e uma reconexão preserva a identidade de tentativas pendentes,
+T08,"cliente, reprodução e experimentos",Adicionar painel e executar cenários de validação,pendente,,T04;T06;T07,2026-11-18,"Painel mostra nós, líder, época e relógios; concorrência, retry, queda e retorno têm evidência registrada",
+T09,"cliente, reprodução e experimentos",Consolidar README e ensaiar a avaliação reproduzível,pendente,,T08,2026-11-18,"Outra pessoa reproduz três nós, dois clientes e queda do líder seguindo o README; demo cabe em oito minutos",
+T10,"cliente, reprodução e experimentos",Consolidar relatório TeX e material de apresentação,pendente,,T09,2026-11-25,"Relatório de 4 a 6 páginas descreve resultados reais, hipóteses, CAP e uso de IA; slide de arquitetura disponível",

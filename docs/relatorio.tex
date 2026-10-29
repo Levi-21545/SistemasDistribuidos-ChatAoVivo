@@ -1,0 +1,162 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{microtype,booktabs,tabularx,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlist{nosep,leftmargin=*}
+\newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
+\title{Chat com ordenação\\\large Relatório -- esboço inicial}
+\author{Levi \and Henri \and André \and Gabriel}
+\date{29 de outubro de 2026}
+\begin{document}
+\maketitle
+\vspace{-1.4em}
+
+\textbf{Estado.} Este arquivo organiza o relatório pedido no enunciado.
+A versão final deverá ter 4 a 6 páginas, com a solução realmente implementada,
+as decisões efetivas e os testes executados. A extensão atual é provisória.
+Ainda não há aplicação ou resultados de execução.
+
+\section{Objetivo e arquitetura proposta}
+Construir um chat cuja mesma sequência de mensagens seja entregue aos clientes
+conectados a nós diferentes, com recuperação após a queda de um nó.
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Parte & Proposta inicial \\
+\midrule
+Aplicação & Python e FastAPI; interface em HTML, CSS e JavaScript puro. \\
+Execução & Três nós equivalentes no Docker Compose, inicialmente em uma máquina. \\
+Transporte & WebSocket para clientes; HTTP e JSON entre nós. \\
+Descoberta & DNS do Compose e nomes de serviços fornecidos por configuração. \\
+Ordenação & Multicast total ordenado por Lamport, com ACK de todos na visão. \\
+Coordenação & Heartbeat e Bully para escolher quem reorganiza o grupo. \\
+Estado & Histórico e pendências em memória, com cópias em cada nó. \\
+\bottomrule
+\end{tabularx}
+
+\textbf{Princípios.} Funções pequenas, código explicável pelos quatro integrantes
+e dependências justificadas. Começar com uma sala, apelido e texto.
+O único extra planejado é um painel com nós, líder, época e relógios.
+A demonstração em uma máquina é uma proposta, ainda a alinhar com o grupo.
+
+\section{Hipóteses e objetivos de correção}
+O cenário inicial admite uma queda por vez, comunicação funcionando entre os
+sobreviventes e nenhuma nova falha durante reorganização ou sincronização.
+Os timeouts pressupõem respostas dos nós saudáveis dentro dos limites configurados.
+
+Pretende-se demonstrar: mesma ordem de entrega, ausência de duplicatas no histórico,
+preservação das mensagens confirmadas após a falha prevista e sincronização de um
+nó que retorna. Uma tentativa sem confirmação pode ter sido entregue.
+
+Partições e falsas suspeitas persistentes ficam fora da garantia inicial.
+São necessários pelo menos dois dos três nós para operar. Essa regra não prova
+ausência de líderes concorrentes nem permite classificar o sistema como CP.
+Reiniciar todos os nós perde o histórico.
+
+
+\section{Algoritmos e decisões de projeto}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Problema & Escolha e justificativa inicial \\
+\midrule
+Ordem de entrega & Multicast por Lamport, fila ordenada e ACKs de todos na visão.
+A ordenação é responsabilidade do protocolo distribuído de mensagens. \\
+Detecção de falha & Heartbeat com timeout. O timeout produz suspeita;
+a reorganização é uma etapa separada. \\
+Coordenação & Bully e época identificam o coordenador da visão.
+O líder administra o grupo e não numera as mensagens do chat. \\
+Recuperação & Pausa, reconciliação de estado e instalação confirmada da visão.
+A segurança dessa adaptação didática ainda precisa ser examinada. \\
+Reentrada & Snapshot antes de admitir o nó e permitir sua participação na eleição. \\
+\bottomrule
+\end{tabularx}
+
+O contrato de mensagens e as transições propostas estão em
+\msg{docs/protocolo.tex}. O relatório deve explicar escolhas e consequências,
+sem reproduzir todos os envelopes do protocolo.
+
+A configuração pequena e o estado em memória reduzem dependências e facilitam
+a explicação. Em contrapartida, o histórico depende dos sobreviventes.
+A exigência de ACK de todos torna a entrega dependente do membro mais lento;
+uma suspeita de falha interrompe o fluxo até a reorganização.
+
+A troca de visão usa pausas locais para coletar histórico e pendências dos
+sobreviventes. Cada pausa define uma fronteira de processamento, não um instante
+global. O histórico reconciliado deve preservar como prefixo o que cada nó já
+entregou. Os detalhes e um exemplo com mensagens em trânsito ficam no protocolo.
+
+\section{Consistência e disponibilidade: análise inicial}
+A consistência pretendida é a mesma ordem de mensagens entregues e um histórico
+anterior preservado como prefixo após a troca de visão. Isso ainda é um objetivo,
+não uma propriedade demonstrada da implementação.
+
+Durante eleição, instalação de visão e sincronização, a proposta pausa a aplicação.
+Com um único sobrevivente, novas mensagens ficam indisponíveis.
+A opção prioriza preservar o estado conhecido dentro do cenário de falha suportado.
+
+A regra de dois participantes não prova exclusividade de liderança ou consistência
+sob partições. A ordenação total proposta também não estabelece, por si só,
+linearizabilidade. A análise final de CAP deverá explicitar o modelo de falha,
+a semântica de confirmação e o comportamento observado, sem atribuir ao sistema
+garantias de partição que não foram implementadas e verificadas.
+Como base para essa discussão:
+\href{https://groups.csail.mit.edu/tds/papers/Gilbert/Brewer2.pdf}{Gilbert e Lynch,
+Perspectives on the CAP Theorem}.
+
+\section{Validação planejada e resultados}
+Nenhum cenário abaixo foi executado. Na versão final, registrar condições,
+comandos, resultado real e evidência de cada teste selecionado.
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Cenário planejado & Comportamento esperado, ainda não verificado \\
+\midrule
+Concorrência & Clientes em nós diferentes recebem a mesma sequência. \\
+Retry & Repetir um pacote após resposta perdida não repete seus efeitos. \\
+Reconexão & Reenvio com o mesmo UUID não duplica o histórico. \\
+Queda do líder & Mensagens confirmadas sobrevivem e os nós restantes retomam. \\
+Mensagens em trânsito & A troca de visão preserva o prefixo já entregue. \\
+Reentrada & O nó reiniciado sincroniza antes de participar normalmente. \\
+Um sobrevivente & O sistema interrompe a aceitação de novas mensagens. \\
+\bottomrule
+\end{tabularx}
+
+\textbf{Resultados atuais.} Implementação e validação em execução pendentes.
+Compilar os documentos não valida os algoritmos ou a recuperação.
+
+\textbf{Revisão do esboço.} Foi examinado um exemplo com queda do nó 3:
+o nó 1 entregou uma mensagem que ainda era pendência do nó 2, e uma segunda
+mensagem estava em trânsito para o nó 2. Um modelo de dados em memória conferiu
+a união dos relatos, a preservação de prefixos, os sufixos a notificar e o
+bloqueio diante de um prefixo incompatível. Não houve execução dos nós, da rede
+ou do protocolo; essa conferência não demonstra sua correção geral.
+
+\section{Limitações e pontos a consolidar}
+Ainda é necessário revisar o bootstrap, os formatos exatos, a confirmação ao
+cliente, a deduplicação entre nós, a fronteira de congelamento e a reconciliação.
+Partições, falsas suspeitas persistentes e novas falhas durante reorganização
+ficam fora da garantia inicial. As limitações efetivas devem ser reavaliadas
+conforme a implementação e os experimentos.
+
+\section{Uso de IA}
+Até esta versão, ferramentas de IA auxiliaram o planejamento, a revisão das
+hipóteses do protocolo e a elaboração dos esboços de documentação.
+O plano foi discutido com Codex e revisado com apoio de Claude.
+Não há implementação de aplicação a atribuir nesta etapa.
+Este registro deve ser atualizado com os usos posteriores e a revisão humana
+realizada pelo grupo. Os integrantes precisam compreender e explicar a solução.
+
+\section*{Referências iniciais}
+Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,
+fornecido durante o planejamento.
+\href{https://lamport.azurewebsites.net/pubs/time-clocks.pdf}{Lamport (1978)};
+\href{https://homepage.cs.uiowa.edu/~ghosh/Bully.pdf}{Garcia-Molina (1982)};
+\href{https://www.cs.cornell.edu/home/rvr/papers/podc/node7.html}{Van Renesse et al.,
+comunicação e mudança de visão}.
+\end{document}

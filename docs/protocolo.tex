@@ -1,0 +1,227 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.1cm]{geometry}
+\usepackage{microtype,booktabs,tabularx,enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlist{nosep,leftmargin=*}
+\newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
+\title{Chat com ordenação\\\large Documento de protocolo -- esboço v0}
+\author{Levi \and Henri \and André \and Gabriel}
+\date{29 de outubro de 2026}
+\begin{document}
+\maketitle
+\vspace{-1.4em}
+
+\textbf{Estado.} Esboço revisável, sem implementação nem validação em execução.
+Os campos e comportamentos abaixo orientam a primeira versão; decisões abertas
+devem ser resolvidas antes de tratar o protocolo como contrato definitivo.
+Arquitetura e justificativas ficam em \msg{docs/relatorio.tex}.
+
+\section{Escopo e transporte}
+Três nós equivalentes, identificados por 1, 2 e 3, trocam JSON por HTTP.
+Clientes usam WebSocket. Nomes dos serviços vêm da configuração e são resolvidos
+pelo DNS do Compose; não há IPs fixos no código.
+O cenário inicial é uma sala, com estado em memória.
+
+A recuperação proposta pressupõe uma queda por vez, rede funcionando entre os
+sobreviventes e nenhuma nova falha durante reorganização ou sincronização.
+São necessários dois dos três nós para operar. O relatório detalha os limites.
+
+\section{Protocolo v0: operação normal}
+\textbf{Identidade e visão.} Cada nó tem ID 1, 2 ou 3.
+Uma visão contém época, líder e membros ativos. A época é proposta como o par
+(contador, ID do coordenador), que distingue propostas sem substituir acordo
+entre participantes. Estados locais: sincronizando, ativo e reorganizando.
+
+Cada nó mantém relógio $L$, fila de pendências, ACKs recebidos, histórico,
+UUIDs entregues e identificação dos pacotes já processados.
+O histórico preserva o conteúdo, a época e o carimbo original de cada evento,
+necessários para a reconciliação; guardar apenas UUIDs não basta.
+
+\textbf{Cliente.} Envia \msg{id}, \msg{sala}, \msg{autor} e \msg{texto};
+\msg{id} é um UUID preservado nos reenvios.
+Reutilizar um UUID com conteúdo diferente é erro de protocolo.
+
+\textbf{Envelope entre nós.} Campos comuns: \msg{tipo}, \msg{pacote_id},
+\msg{epoca} e \msg{origem}. Um retry preserva o mesmo pacote.
+\msg{MSG} acrescenta relógio e conteúdo da mensagem; \msg{ACK} acrescenta
+seu relógio e a referência ao evento reconhecido.
+O evento é identificado pela época, origem e timestamp original.
+
+\begin{enumerate}
+\item Ao aceitar uma mensagem do cliente, o nó incrementa $L$, registra o evento
+e enfileira seu multicast para todos os membros, incluindo recepção local.
+\item Ao receber \msg{MSG}, atualiza $L \leftarrow \max(L,t)+1$ e guarda a
+mensagem na fila, ordenada pelo \textbf{carimbo original} $(t,\mathrm{origem})$.
+O relógio atualizado do receptor não altera essa chave.
+\item O receptor incrementa seu relógio para emitir \msg{ACK} a todos os membros.
+Receber um ACK também atualiza $L$ pela regra de recepção.
+ACKs que chegam antes do MSG correspondente são guardados.
+\item A primeira mensagem da fila só é entregue após ACK de todos os membros
+daquela visão. O UUID é registrado no histórico e os clientes locais são avisados.
+\end{enumerate}
+
+\textbf{Confirmação.} O nó do cliente confirma a mensagem quando a entrega.
+Receber pelo WebSocket ou responder a um POST não confirma entrega.
+Na reconexão, o cliente consulta ou reenvia usando o mesmo UUID.
+Os detalhes desse contrato com o navegador ainda serão fechados.
+
+\textbf{Relógio.} Modela os eventos da camada \msg{MSG}/\msg{ACK}.
+Heartbeats ficam fora dessa ordenação. Dentro de uma visão, a chave é
+$(t,\mathrm{origem})$; entre visões, o histórico anterior deve permanecer
+como prefixo imutável. Lamport ordena mensagens; o líder coordena a visão.
+
+\subsection*{FIFO, retries e deduplicação}
+Uma fila de saída por destino envia um POST por vez e só avança após a resposta.
+Falhas de transporte repetem o mesmo pacote. Uma resposta pode se perder depois
+do processamento: o receptor deve responder ao retry sem repetir seus efeitos.
+
+Atualização de estado e enfileiramento de cada multicast são serializados.
+O multicast inteiro é enfileirado antes de processar outro evento.
+O handler não espera respostas de outros nós para concluir o processamento local.
+
+A deduplicação ocorre no transporte e na entrega. Pacotes repetidos não geram
+novo evento nem nova emissão de ACK; um UUID entregue não reaparece no histórico.
+A identidade dos pacotes após reinício e a tentativa simultânea por nós distintos
+precisam de detalhamento antes da implementação.
+
+\subsection*{Heartbeat e eleição}
+Parâmetros iniciais: heartbeat a cada 1 segundo e suspeita após 3 segundos.
+São configuráveis e não representam prazo garantido de recuperação.
+Com líder disponível, ele coordena a reorganização. Se ele for suspeito, os
+membros ativos executam Bully com \msg{ELECTION}, \msg{OK} e \msg{COORDINATOR}.
+Nós sincronizando ficam fora da eleição. Vencer não libera envios automaticamente.
+
+\section{Reorganização e reentrada: proposta a revisar}
+A transição fecha a visão antiga antes de retomar a aplicação.
+A sequência abaixo é um esboço de recuperação sob as hipóteses da seção 1;
+sua segurança ainda deve ser examinada em exemplos e testes.
+
+\textbf{O que significa o corte.} Visão é a configuração compartilhada de membros,
+líder e época. O corte é a pausa local que separa o processamento normal da visão
+antiga e a coleta do estado para reorganização. Não é um horário global nem um
+limite no relógio de Lamport: cada nó pausa em um momento diferente.
+A pausa e a captura de estado são serializadas com o processamento local.
+Uma mensagem aceita antes da pausa aparece no histórico ou nas pendências
+informadas; depois da pausa, MSGs e ACKs antigos deixam de alterar esse estado.
+
+\begin{enumerate}
+\item \msg{VIEW_PREPARE}: o coordenador informa a transição e os membros propostos.
+O próprio coordenador também executa a pausa e participa da coleta.
+\item Cada participante pausa novos envios e entregas, encerra retries de
+\msg{MSG}/\msg{ACK} da visão antiga e captura seu estado. Cópias antigas desses
+dois tipos recebidas depois da pausa são descartadas com resposta explícita,
+encerrando o retry. Os controles válidos da transição continuam sendo processados;
+a regra de descarte não pode bloquear a reorganização.
+\item \msg{VIEW_STATE}: todos os membros propostos informam histórico,
+pendências e relógio. O coordenador aguarda todos.
+\item O coordenador reúne os eventos conhecidos, ordenando os da visão encerrada
+pelos carimbos originais. O resultado deve preservar, como prefixo, cada histórico
+já entregue. Incompatibilidade mantém a pausa e sinaliza erro.
+\item \msg{VIEW_INSTALL}: distribui nova época, membros, histórico reconciliado
+e relógio de referência, ao menos o maior relógio informado na coleta.
+Os nós não reduzem seu relógio local. Instalam o mesmo estado e permanecem pausados,
+preservando o sufixo ainda não notificado aos seus clientes.
+\item \msg{VIEW_READY}: cada membro confirma a instalação.
+Só após todos confirmarem, o coordenador envia \msg{VIEW_RESUME}.
+Na retomada, cada nó notifica seus clientes somente das mensagens que faltavam
+em seu histórico anterior, preservando a ordem e os UUIDs já entregues.
+\end{enumerate}
+
+Mensagens da nova visão recebidas antes da retomada aguardam processamento.
+Pacotes antigos não retornam à operação normal.
+Pendências conhecidas por sobreviventes podem ser recuperadas. Uma tentativa
+não confirmada conhecida apenas pelo nó que caiu pode desaparecer e exigir reenvio.
+Uma nova falha durante essa transição fica fora da garantia inicial.
+
+\subsection*{Exemplo revisado: mensagens em trânsito}
+A visão inicial é época $(1,3)$, membros $\{1,2,3\}$ e líder 3.
+Os históricos já contêm a mensagem \msg{oi}.
+O nó 1 origina \msg{x}, com carimbo $(10,1)$; o nó 3 origina \msg{y},
+com carimbo $(20,3)$, e cai depois de enviar cópias.
+
+Antes das pausas, o nó 1 tem todos os ACKs de \msg{x} e a entrega.
+O nó 2 ainda espera o ACK do nó 1 para \msg{x}; já recebeu o ACK do nó 3.
+A cópia de \msg{y} destinada ao nó 1 chegou; a destinada ao nó 2 está em trânsito.
+Esse cenário respeita FIFO por par de nós: o ACK do nó 3 para \msg{x}
+chegou ao nó 2 antes de sua cópia de \msg{y}.
+
+\begin{tabularx}{\linewidth}{@{}lXX@{}}
+\toprule
+Estado após a pausa local & Nó 1 & Nó 2 \\
+\midrule
+Histórico entregue & \msg{[oi, x]} & \msg{[oi]} \\
+Pendências conhecidas & \msg{[y]} & \msg{[x]} \\
+\bottomrule
+\end{tabularx}
+
+O Bully escolhe o nó 2 entre os sobreviventes. Ambos pausam e informam os estados
+acima. Se a cópia antiga de \msg{y} chegar ao nó 2 depois de sua pausa, será
+descartada nesse caminho normal. Seu conteúdo, porém, já foi preservado no relato
+do nó 1 e será recuperado pela transição.
+
+A união ordenada dos relatos produz \msg{[oi, x, y]}, que estende os dois
+históricos. A proposta instala a visão de época $(2,2)$, membros $\{1,2\}$,
+líder 2 e esse histórico. Após os dois READYs, a retomada entrega apenas
+\msg{y} aos clientes do nó 1 e \msg{x, y} aos do nó 2.
+As pendências recuperadas são resolvidas pela instalação comum, sem esperar ACK
+do membro removido. A instalação pode recuperar uma mensagem que ainda não tinha
+sido confirmada; ausência de confirmação não significa cancelamento.
+
+Uma mensagem \msg{z} conhecida somente pelo nó 3 que caiu pode não aparecer
+na coleta. Ela não poderia ter sido confirmada pelo fluxo normal sem ACK dos
+demais membros. Seu cliente poderá repetir a tentativa com o mesmo UUID.
+Este exemplo não cobre falhas adicionais durante a reorganização.
+
+\subsection*{Reentrada}
+O nó retorna sincronizando e envia \msg{JOIN}.
+Sua admissão usa a mesma pausa. Recebe \msg{SNAPSHOT} com histórico, UUIDs
+entregues, visão e relógio antes de entrar no grupo ativo.
+Depois pode participar de uma eleição Bully, inclusive se tiver o maior ID.
+
+
+\section{Mensagens de controle}
+Os tipos abaixo também usam o envelope comum. O payload exato, a validação
+dos campos e as respostas HTTP ainda serão definidos.
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Tipo & Conteúdo ou função pretendida \\
+\midrule
+\msg{HEARTBEAT} & Sinal de vida; campos de estado a fechar. \\
+\msg{ELECTION} / \msg{OK} & Iniciar eleição e responder como candidato de ID maior. \\
+\msg{COORDINATOR} & Anunciar o vencedor, sem liberar envios da aplicação. \\
+\msg{VIEW_PREPARE} & Identificar a transição e os membros propostos. \\
+\msg{VIEW_STATE} & Informar histórico, pendências e relógio após o corte. \\
+\msg{VIEW_INSTALL} & Distribuir época, membros, histórico e relógio de referência. \\
+\msg{VIEW_READY} & Confirmar a instalação da transição correspondente. \\
+\msg{VIEW_RESUME} & Liberar a operação após a confirmação de todos. \\
+\msg{JOIN} & Solicitar admissão de um nó em sincronização. \\
+\msg{SNAPSHOT} & Transferir histórico, UUIDs entregues, visão e relógio. \\
+\bottomrule
+\end{tabularx}
+
+\section{Decisões de contrato ainda abertas}
+Fechar o bootstrap da primeira visão, os tipos e nomes exatos dos campos,
+as respostas HTTP e a referência de transição usada nas mensagens de controle.
+Detalhar a identidade após reinício, o tratamento do mesmo UUID recebido por nós
+distintos, a implementação da pausa local e a reconciliação de pendências.
+Definir também como o navegador consulta, confirma e reenvia tentativas.
+
+A revisão deve simular mensagens em trânsito e conferir a preservação do prefixo
+já entregue. O exemplo acima foi conferido com um modelo de dados em memória:
+união ordenada, prefixos, sufixos a entregar e rejeição de prefixo incompatível.
+Isso não executou nós, transporte ou o protocolo e não prova sua segurança geral.
+\section*{Referências iniciais}
+Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,
+fornecido durante o planejamento.
+\href{https://lamport.azurewebsites.net/pubs/time-clocks.pdf}{Lamport (1978)};
+\href{https://homepage.cs.uiowa.edu/~ghosh/Bully.pdf}{Garcia-Molina (1982)};
+\href{https://www.cs.cornell.edu/home/rvr/papers/podc/node7.html}{Van Renesse et al.,
+comunicação e mudança de visão}.
+\end{document}
