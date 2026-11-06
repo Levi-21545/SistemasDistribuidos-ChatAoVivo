@@ -4,8 +4,9 @@ Trabalho final de Sistemas Distribuídos de 2026, por Levi, Henri, André e Gabr
 
 Implementados (aguardando revisão do grupo): transporte FIFO com retry,
 multicast ordenado por Lamport, heartbeat, eleição Bully e bootstrap da visão
-inicial (T02–T04). Pendentes: reorganização após queda, reentrada, painel e
-validação no Compose (T05–T10).
+inicial (T02–T04). O Compose foi executado em 06/11 com esse escopo.
+Pendentes: reorganização após queda, reentrada, painel e ensaio da avaliação
+(T05–T10).
 
 ## Por onde começar
 
@@ -84,11 +85,17 @@ No Linux/macOS, troque `.\.venv\Scripts\` por `.venv/bin/` em todos os comandos.
 .\.venv\Scripts\python -m pytest
 ```
 
-Leva cerca de 20 segundos. O resultado esperado é `242 passed`. Os testes:
+Leva cerca de 20 segundos (4 a 5 segundos num Mac em 06/11). O resultado
+esperado é `289 passed` (verificado em 06/11, Python 3.13, macOS). Os testes:
 
 - simulam a rede em 200 cenários aleatórios, com pacotes repetidos e fora de
   ordem entre canais, e conferem que os três nós entregam a mesma sequência;
 - testam a eleição Bully, a detecção de falha e a criação da visão inicial;
+- testam o canal FIFO real com HTTP simulado: repete o mesmo pacote após 500,
+  503, falha de conexão, timeout ou resposta perdida, e para sem deixar o
+  próximo passar à frente quando o destino recusa o pacote (400);
+- conferem que pacotes malformados entre nós recebem 400 sem alterar relógio,
+  fila, histórico ou deduplicação;
 - sobem três servidores de verdade (portas 18001–18003), enviam mensagens
   concorrentes e derrubam o líder.
 
@@ -153,7 +160,7 @@ Religar só o nó que caiu ainda não funciona: isso é a reentrada (T06).
 
 Troque a porta (8001, 8002 ou 8003) para ver os outros nós.
 
-### Com Docker (ainda não testado)
+### Com Docker
 
 ```sh
 docker compose up --build
@@ -161,6 +168,23 @@ docker compose up --build
 
 O chat fica em <http://localhost:8001>, <http://localhost:8002> e
 <http://localhost:8003>. Para derrubar o líder: `docker compose kill no3`.
+Para encerrar e remover os contêineres: `docker compose down`.
+
+Verificado em 06/11 (OrbStack, Docker 29.8.2), com `docker compose build
+--no-cache`, `docker compose up -d`, `docker compose kill no3` e
+`docker compose down`:
+
+- os três nós ficaram ativos na visão `(1, 3)`, com líder 3;
+- três clientes WebSocket, um por nó, enviaram 20 mensagens concorrentes cada;
+  os três receberam as mesmas 60 entregas na mesma ordem, e `/historico`
+  coincidiu nos três nós;
+- o mesmo UUID enviado aos nós 1 e 2 e reenviado ao nó 1 apareceu uma única
+  vez em cada histórico, e o reenvio recebeu `confirmada`;
+- depois de `kill no3`, os nós 1 e 2 suspeitaram do nó 3, elegeram o nó 2 e
+  ficaram `reorganizando` na época `(1, 3)`; um novo envio foi recusado e os
+  históricos (61 mensagens) continuaram iguais.
+
+Esse roteiro foi executado por script, não pelo navegador.
 
 ### Ajustes opcionais
 

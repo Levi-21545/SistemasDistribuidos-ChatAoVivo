@@ -21,7 +21,8 @@
 A versão final deverá ter 4 a 6 páginas, com a solução realmente implementada,
 as decisões efetivas e os testes executados. A extensão atual é provisória.
 Em 5/11 estão implementados transporte, ordenação, heartbeat, Bully e bootstrap
-(T02--T04); reorganização, reentrada, painel e Compose validado seguem pendentes.
+(T02--T04). Em 6/11, duas correções de robustez foram feitas e o Compose foi
+executado nesse escopo. Reorganização, reentrada e painel seguem pendentes.
 
 \section{Objetivo e arquitetura proposta}
 Construir um chat cuja mesma sequência de mensagens seja entregue aos clientes
@@ -139,8 +140,32 @@ sequência. O mesmo UUID enviado a dois nós entrou uma vez no histórico.
 Queda do líder: ao matar o processo do nó 3, os nós 1 e 2 suspeitaram após o
 timeout, elegeram o nó 2 por Bully e continuaram recusando novos envios, como
 previsto até a reorganização (T05). Mensagens em trânsito, reentrada e um
-sobrevivente ainda não foram testados. O Compose não foi executado: o ambiente
-usado não tinha Docker.
+sobrevivente ainda não foram testados.
+
+\textbf{Correções e resultados de 6/11.} O canal FIFO passou a repetir o mesmo
+pacote também após HTTP 500 e a parar, sem deixar o seguinte ultrapassá-lo,
+diante de uma recusa permanente; antes, abandonava o pacote e enviava o próximo.
+Os pacotes entre nós passaram a ter envelope e campos validados antes de qualquer
+efeito; antes, um \msg{MSG} sem \msg{pacote_id} alterava fila e relógio e só
+depois lançava exceção. Com \msg{pytest}, 289 testes passaram em três execuções
+(Python 3.13, macOS).
+\begin{itemize}
+\item Testes controlados: 7 do \msg{CanalFIFO} real com HTTP simulado (500 seguido
+de sucesso, 503, conexão e timeout, resposta perdida com receptor real, recusa
+permanente, independência entre destinos) e 40 de validação (37 pacotes
+malformados recusados com 400, sem alterar relógio, fila, ACKs, histórico,
+deduplicação ou pacotes emitidos, e formatos válidos, inclusive época
+\msg{null} nos controles). Contra o código anterior, os casos de 500 e de
+recusa permanente falharam, assim como 26 dos 37 pacotes malformados.
+\item Integração local: os 4 testes com três processos \msg{uvicorn} passaram.
+\item Compose (OrbStack, Docker 29.8.2), com imagens reconstruídas: os três nós
+ficaram ativos na visão $(1,3)$; três clientes WebSocket, um por nó, enviaram
+20 mensagens concorrentes cada e receberam as mesmas 60 entregas na mesma ordem,
+com \msg{/historico} igual nos três nós. O mesmo UUID enviado aos nós 1 e 2 e
+reenviado ao 1 apareceu uma vez em cada histórico. Após \msg{docker compose kill no3},
+os nós 1 e 2 elegeram o nó 2 e ficaram reorganizando na época $(1,3)$,
+recusando novo envio, com os históricos de 61 mensagens preservados e iguais.
+\end{itemize}
 
 \textbf{Revisão do esboço.} Foi examinado um exemplo com queda do nó 3:
 o nó 1 entregou uma mensagem que ainda era pendência do nó 2, e uma segunda
@@ -161,7 +186,9 @@ conforme a implementação e os experimentos.
 Até esta versão, ferramentas de IA auxiliaram o planejamento, a revisão das
 hipóteses do protocolo e a elaboração dos esboços de documentação.
 O plano foi discutido com Codex e revisado com apoio de Claude.
-Não há implementação de aplicação a atribuir nesta etapa.
+As correções de 6/11 no canal FIFO e na validação de pacotes, com seus testes,
+foram escritas com Claude Code a partir de um briefing do grupo; a revisão
+humana dessas correções está pendente.
 Este registro deve ser atualizado com os usos posteriores e a revisão humana
 realizada pelo grupo. Os integrantes precisam compreender e explicar a solução.
 

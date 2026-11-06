@@ -240,8 +240,13 @@ A referência de transição (\msg{transicao}) é a época proposta.
 descartado por época antiga ou ignorado; em todos os casos, o retry termina.
 \msg{503}: o receptor ainda não pode processar (sem visão, aguardando
 \msg{VIEW_RESUME} ou época mais nova que a sua); o canal repete o mesmo pacote
-sem avançar, preservando o FIFO. \msg{400}: pacote malformado, registrado como
-defeito e não repetido. Só MSG e ACK passam pelo canal FIFO com retry e pela
+sem avançar, preservando o FIFO. Falha de transporte, timeout e outros 5xx
+também repetem o mesmo pacote. \msg{400}: pacote malformado, recusado antes de
+qualquer efeito. O envelope e os campos do tipo são conferidos primeiro; números
+são inteiros JSON, sem booleanos, e só os controles aceitam época \msg{null}.
+Uma recusa como essa indica defeito: o pacote não é repetido, e o canal daquele
+destino para nele, registrando o motivo, sem deixar o seguinte ultrapassá-lo.
+Os outros destinos seguem. Só MSG e ACK passam pelo canal FIFO com retry e pela
 deduplicação por \msg{pacote_id}. O controle é enviado uma vez, de forma direta,
 e é idempotente: quem precisa de resposta o reenvia a cada ciclo de heartbeat.
 
@@ -276,8 +281,12 @@ ordenar pelo relógio do receptor) fizeram a simulação falhar. Testes assíncr
 cobrem Bully, suspeita, bootstrap e a exclusão de nós sincronizando.
 Um teste de integração sobe três processos reais em \msg{localhost}, envia 45
 mensagens concorrentes por três clientes WebSocket e derruba o líder; os
-sobreviventes elegeram o nó 2 e mantiveram os envios pausados. O Compose não foi
-executado neste ambiente. Esses testes não provam a correção geral.
+sobreviventes elegeram o nó 2 e mantiveram os envios pausados. Em 6/11, testes
+do canal FIFO real com HTTP simulado cobriram 500, 503, resposta perdida e recusa
+permanente, e 37 pacotes malformados foram recusados sem efeitos. No Compose,
+os três nós entregaram as mesmas 60 mensagens concorrentes e, após a queda do
+nó 3, elegeram o nó 2 e permaneceram pausados. Esses testes não provam a
+correção geral.
 
 O exemplo da seção 3 foi conferido com um modelo de dados em memória:
 união ordenada, prefixos, sufixos a entregar e rejeição de prefixo incompatível.
