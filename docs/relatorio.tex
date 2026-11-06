@@ -21,8 +21,9 @@
 A versão final deverá ter 4 a 6 páginas, com a solução realmente implementada,
 as decisões efetivas e os testes executados. A extensão atual é provisória.
 Em 5/11 estão implementados transporte, ordenação, heartbeat, Bully e bootstrap
-(T02--T04). Em 6/11, duas correções de robustez foram feitas e o Compose foi
-executado nesse escopo. Reorganização, reentrada e painel seguem pendentes.
+(T02--T04). Em 6/11, duas correções de robustez foram feitas e a reorganização
+após uma queda (T05) foi implementada e validada no Compose. Reentrada (T06) e
+painel seguem pendentes.
 
 \section{Objetivo e arquitetura proposta}
 Construir um chat cuja mesma sequência de mensagens seja entregue aos clientes
@@ -73,8 +74,9 @@ Detecção de falha & Heartbeat com timeout. O timeout produz suspeita;
 a reorganização é uma etapa separada. \\
 Coordenação & Bully e época identificam o coordenador da visão.
 O líder administra o grupo e não numera as mensagens do chat. \\
-Recuperação & Pausa, reconciliação de estado e instalação confirmada da visão.
-A segurança dessa adaptação didática ainda precisa ser examinada. \\
+Recuperação & Corte síncrono em cada sobrevivente, reconciliação dos estados
+capturados e barreira INSTALL, READY de todos, RESUME. Adaptação didática de
+troca de visão, testada no cenário suportado; não é consenso geral. \\
 Reentrada & Snapshot antes de admitir o nó e permitir sua participação na eleição. \\
 \bottomrule
 \end{tabularx}
@@ -88,19 +90,33 @@ a explicação. Em contrapartida, o histórico depende dos sobreviventes.
 A exigência de ACK de todos torna a entrega dependente do membro mais lento;
 uma suspeita de falha interrompe o fluxo até a reorganização.
 
-A troca de visão usa pausas locais para coletar histórico e pendências dos
-sobreviventes. Cada pausa define uma fronteira de processamento, não um instante
-global. O histórico reconciliado deve preservar como prefixo o que cada nó já
-entregou. Os detalhes e um exemplo com mensagens em trânsito ficam no protocolo.
+A troca de visão separa a pausa por suspeita, que só recusa novos envios, do
+corte definitivo, que acontece ao aceitar o \msg{VIEW_PREPARE}: no mesmo passo
+síncrono o nó pausa, captura histórico, pendências e relógio e descarta as filas
+de dados da visão antiga. Cada corte é uma fronteira local, não um instante global.
+O coordenador, que é sempre o maior ID vivo, junta as capturas: o histórico mais
+longo vira base e as pendências que faltam entram pela chave original. Isso é
+seguro porque, com FIFO e ACK de todos, uma mensagem só é entregue quando nenhuma
+outra de chave menor pode chegar. Logo, nenhuma pendência nova tem chave menor que
+a de uma entrega já feita naquela visão, e anexar as pendências preserva todos os
+prefixos. A exceção são as duplicatas já resolvidas: outra ocorrência de um UUID
+já entregue pode ter sido descartada por um nó e seguir pendente em outro, com
+chave menor. Por isso o UUID é conferido antes da ordem. Se a condição falhar para
+uma pendência nova, a reconciliação para com erro em vez de reescrever o que foi
+confirmado. A instalação fica pausada até o RESUME, e só
+então cada nó publica aos clientes o sufixo que não tinha entregue. O protocolo
+traz os formatos e o exemplo com mensagens em trânsito.
 
 \section{Consistência e disponibilidade: análise inicial}
 A consistência pretendida é a mesma ordem de mensagens entregues e um histórico
-anterior preservado como prefixo após a troca de visão. Isso ainda é um objetivo,
-não uma propriedade demonstrada da implementação.
+anterior preservado como prefixo após a troca de visão. Nos testes do cenário
+suportado (seção 5), isso se manteve; não é uma prova geral.
 
-Durante eleição, instalação de visão e sincronização, a proposta pausa a aplicação.
-Com um único sobrevivente, novas mensagens ficam indisponíveis.
-A opção prioriza preservar o estado conhecido dentro do cenário de falha suportado.
+Durante suspeita, eleição e troca de visão, a aplicação fica pausada. No Compose,
+essa janela foi de 4 a 5 segundos entre o \msg{kill} e a nova visão ativa, com os
+tempos padrão (suspeita após 3 s). Com um único sobrevivente, novas mensagens
+ficam indisponíveis por tempo indeterminado. A opção prioriza preservar o estado
+conhecido, isto é, consistência sobre disponibilidade dentro do cenário suportado.
 
 A regra de dois participantes não prova exclusividade de liderança ou consistência
 sob partições. A ordenação total proposta também não estabelece, por si só,
@@ -167,20 +183,45 @@ os nós 1 e 2 elegeram o nó 2 e ficaram reorganizando na época $(1,3)$,
 recusando novo envio, com os históricos de 61 mensagens preservados e iguais.
 \end{itemize}
 
-\textbf{Revisão do esboço.} Foi examinado um exemplo com queda do nó 3:
-o nó 1 entregou uma mensagem que ainda era pendência do nó 2, e uma segunda
-mensagem estava em trânsito para o nó 2. Um modelo de dados em memória conferiu
-a união dos relatos, a preservação de prefixos, os sufixos a notificar e o
-bloqueio diante de um prefixo incompatível. Não houve execução dos nós, da rede
-ou do protocolo; essa conferência não demonstra sua correção geral.
+\textbf{Reorganização (T05, 6/11).} Com \msg{pytest}, 345 testes passaram em
+três execuções da suíte (Python 3.13, macOS). A revisão encontrou dois defeitos,
+corrigidos com regressões que falharam antes das correções. O primeiro: uma
+duplicata já resolvida bloqueava a reconciliação. O segundo: um nó reiniciado
+logo após o bootstrap não era percebido, porque os pares só o conheciam com época
+nula, e a regra antiga também tomava um heartbeat atrasado do bootstrap por
+reinício. O reinício passou a ser detectado pela encarnação do \msg{pacote_id}.
+\begin{itemize}
+\item Simulação com Bully real e rede FIFO por canal: a queda do líder no meio do
+tráfego terminou na visão $(2,2)$, com históricos iguais, prefixos preservados e
+mensagens novas entregues, em 15 sementes da suíte e em 300 de uma rodada avulsa.
+A queda de membro comum terminou em $(2,3)$, com o líder 3. O exemplo do protocolo
+foi montado com a sequência FIFO: o nó 1 publicou só \msg{y}, o nó 2 publicou
+\msg{x} e \msg{y}, e as cópias antigas chegadas após o corte foram descartadas.
+Também passaram: perda de cada controle uma vez; reenvio de todos os controles após
+a retomada, sem efeito; dados novos com 503 até o RESUME; históricos incompatíveis
+mantendo a pausa com erro; UUID repetido em nós distintos sem duplicação; relógio
+que não diminui; sobrevivente único sem retomada; nó reiniciado fora da visão, inclusive logo após o bootstrap; e
+clientes, conectados antes ou durante a instalação, sem receber o sufixo antes do
+RESUME nem em dobro.
+\item Integração local: após matar o processo do nó 3, os nós 1 e 2 ficaram ativos
+em $(2,2)$ e entregaram uma mensagem nova.
+\item Compose, com \msg{scripts/validar_compose.py} em três execuções (a última
+depois das correções) e cenários independentes: 45 mensagens concorrentes chegaram na mesma ordem aos três clientes.
+Depois do \msg{kill} do nó 3, os nós 1 e 2 instalaram $(2,2)$, com líder 2; depois
+do \msg{kill} do nó 1, os nós 2 e 3 instalaram $(2,3)$, com líder 3. Em ambos, os
+históricos ficaram preservados e iguais, e uma mensagem nova chegou aos dois
+sobreviventes. A queda ocorreu com o tráfego já entregue: mensagens em trânsito
+só foram exercitadas na simulação.
+\end{itemize}
 
 \section{Limitações e pontos a consolidar}
-Bootstrap, formatos, confirmação ao cliente e deduplicação entre nós foram
-fechados na v1 do protocolo. O bootstrap exige os três nós. Ainda é necessário
-definir a fronteira de congelamento e a reconciliação.
-Partições, falsas suspeitas persistentes e novas falhas durante reorganização
-ficam fora da garantia inicial. As limitações efetivas devem ser reavaliadas
-conforme a implementação e os experimentos.
+O bootstrap exige os três nós, e a retomada exige dois. Um nó reiniciado fica
+sincronizando, fora da visão, até a T06 (JOIN/SNAPSHOT). Ficam fora da garantia:
+partições, falsas suspeitas (um nó lento que perde o prazo do heartbeat ou do
+\msg{ELECTION} é excluído) e falhas novas durante a transição, inclusive do
+coordenador, caso em que os nós permanecem pausados. Os identificadores de
+pacotes processados crescem sem limite durante a execução, e reiniciar todos os
+nós perde o histórico.
 
 \section{Uso de IA}
 Até esta versão, ferramentas de IA auxiliaram o planejamento, a revisão das
@@ -188,7 +229,9 @@ hipóteses do protocolo e a elaboração dos esboços de documentação.
 O plano foi discutido com Codex e revisado com apoio de Claude.
 As correções de 6/11 no canal FIFO e na validação de pacotes, com seus testes,
 foram escritas com Claude Code a partir de um briefing do grupo; a revisão
-humana dessas correções está pendente.
+humana dessas correções está pendente. A implementação da T05 (reorganização,
+reconciliação, testes e roteiro de validação no Compose) também foi escrita com
+Claude Code a partir de um briefing do grupo, com revisão humana pendente.
 Este registro deve ser atualizado com os usos posteriores e a revisão humana
 realizada pelo grupo. Os integrantes precisam compreender e explicar a solução.
 

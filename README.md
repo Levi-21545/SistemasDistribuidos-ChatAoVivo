@@ -3,18 +3,21 @@
 Trabalho final de Sistemas Distribuídos de 2026, por Levi, Henri, André e Gabriel.
 
 Implementados (aguardando revisão do grupo): transporte FIFO com retry,
-multicast ordenado por Lamport, heartbeat, eleição Bully e bootstrap da visão
-inicial (T02–T04). O Compose foi executado em 06/11 com esse escopo.
-Pendentes: reorganização após queda, reentrada, painel e ensaio da avaliação
-(T05–T10).
+multicast ordenado por Lamport, heartbeat, eleição Bully, bootstrap da visão
+inicial e reorganização após a queda de um nó (T02–T05), validados no Compose
+em 06/11. Pendentes: reentrada de um nó reiniciado, painel e ensaio da avaliação
+(T06–T10).
 
 ## Por onde começar
 
 - [app/](app/): código do nó. `no.py` reúne as regras; `ordenacao.py`, a fila
-  do multicast; `transporte.py`, os canais FIFO; `main.py`, as rotas.
+  do multicast; `reconciliacao.py`, a junção dos estados na troca de visão;
+  `transporte.py`, os canais FIFO; `main.py`, as rotas.
 - [tests/](tests/): testes unitários, simulação de rede e integração.
+- [scripts/validar_compose.py](scripts/validar_compose.py): validação da
+  queda do líder e de membro comum no Docker Compose.
 - [Documento de protocolo em TeX](docs/protocolo.tex): formatos de mensagens,
-  fluxos de comunicação, confirmação e recuperação proposta.
+  fluxos de comunicação, confirmação e reorganização após queda.
 - [Relatório em TeX](docs/relatorio.tex): arquitetura, decisões, algoritmos,
   discussão de CAP e validação planejada.
 - [Tarefas em CSV](tarefas.csv): entregas, dependências, marcos e evidências.
@@ -63,9 +66,12 @@ quatro minutos é opcional. A logística da demonstração ainda será alinhada.
 
 Três servidores (nós 1, 2 e 3) rodam ao mesmo tempo. Cada pessoa abre o chat
 conectada a um deles, e todos veem as mensagens **na mesma ordem**, mesmo em nós
-diferentes. Se o líder (nó 3) cair, os outros percebem em cerca de 3 segundos e
-elegem um novo líder (nó 2). Por enquanto, depois da queda, o chat fica pausado:
-voltar a aceitar mensagens é a próxima tarefa (T05).
+diferentes. Se um nó cair, os outros percebem em cerca de 3 segundos, pausam o
+chat, juntam o que cada um sabia e instalam uma nova visão só com os dois que
+sobraram. Se quem caiu foi o líder (nó 3), elegem antes um novo líder (nó 2).
+Em seguida, o chat volta a aceitar mensagens, com o mesmo histórico nos dois
+nós. Com só um nó vivo, o chat fica pausado. Um nó que volta depois de cair
+ainda não é readmitido; isso é a próxima tarefa (T06).
 
 ### 1. Preparar o ambiente (só na primeira vez)
 
@@ -85,8 +91,8 @@ No Linux/macOS, troque `.\.venv\Scripts\` por `.venv/bin/` em todos os comandos.
 .\.venv\Scripts\python -m pytest
 ```
 
-Leva cerca de 20 segundos (4 a 5 segundos num Mac em 06/11). O resultado
-esperado é `289 passed` (verificado em 06/11, Python 3.13, macOS). Os testes:
+Leva cerca de 20 segundos (10 segundos num Mac em 06/11). O resultado
+esperado é `345 passed` (verificado em 06/11, Python 3.13, macOS). Os testes:
 
 - simulam a rede em 200 cenários aleatórios, com pacotes repetidos e fora de
   ordem entre canais, e conferem que os três nós entregam a mesma sequência;
@@ -96,8 +102,11 @@ esperado é `289 passed` (verificado em 06/11, Python 3.13, macOS). Os testes:
   próximo passar à frente quando o destino recusa o pacote (400);
 - conferem que pacotes malformados entre nós recebem 400 sem alterar relógio,
   fila, histórico ou deduplicação;
+- simulam a queda do líder e de um membro comum, com mensagens em trânsito,
+  controles perdidos ou repetidos, históricos incompatíveis e nó reiniciado, e
+  conferem a nova visão, os históricos e o que cada cliente recebe;
 - sobem três servidores de verdade (portas 18001–18003), enviam mensagens
-  concorrentes e derrubam o líder.
+  concorrentes, derrubam o líder e conferem a retomada.
 
 Para rodar só os testes rápidos, sem subir servidores:
 `.\.venv\Scripts\python -m pytest -m "not integracao"`.
@@ -140,22 +149,30 @@ mensagem aparece a posição e o carimbo usado para ordenar, por exemplo
 `#3 · relógio (10, nó 2)`. A faixa no topo mostra o nó, o estado, o líder,
 a época e o relógio.
 
-**Derrube o líder.** No terminal 3, aperte `Ctrl+C`. Cerca de 3 segundos depois:
+**Derrube o líder.** No terminal 3, aperte `Ctrl+C`. Em 4 a 5 segundos:
 
-- os terminais 1 e 2 mostram `nó 3 suspeito` e `coordenador eleito: nó 2`;
-- a faixa do chat muda para **reorganizando · líder nó 2**;
-- o botão Enviar fica desabilitado: o chat está pausado de propósito até a
-  reorganização (T05).
+- os terminais 1 e 2 mostram `nó 3 suspeito`, `coordenador eleito: nó 2`,
+  `corte da época [1, 3]` e, por fim, `nó ativo na época (2, 2)`;
+- a faixa do chat passa por **reorganizando** e volta a **ativo · líder nó 2**,
+  época `(2, 2)`;
+- o botão Enviar volta a funcionar, e as duas abas continuam com o mesmo
+  histórico.
+
+Para derrubar um membro comum, feche o terminal 1 em vez do 3: o líder 3
+continua e a nova época é `(2, 3)`. Esse roteiro no navegador não foi refeito
+depois da T05; o mesmo comportamento foi verificado no Compose (abaixo).
 
 Para recomeçar, feche todos os nós (`Ctrl+C`) e suba os três de novo.
-Religar só o nó que caiu ainda não funciona: isso é a reentrada (T06).
+Religar só o nó que caiu ainda não funciona: ele volta com outra encarnação,
+os outros o tratam como falho e ele fica sincronizando, fora do grupo, até a
+reentrada (T06).
 
 ### Endereços úteis
 
 | Endereço | O que mostra |
 | --- | --- |
 | `http://localhost:8001/` | Chat |
-| `http://localhost:8001/estado` | Estado do nó em JSON: visão, líder, relógio, suspeitos, pendências |
+| `http://localhost:8001/estado` | Estado do nó em JSON: visão, líder, relógio, suspeitos, pendências, `fase` e `transicao` (etapa, membros aguardados e erro) |
 | `http://localhost:8001/historico` | Mensagens entregues, na ordem total |
 
 Troque a porta (8001, 8002 ou 8003) para ver os outros nós.
@@ -186,6 +203,29 @@ Verificado em 06/11 (OrbStack, Docker 29.8.2), com `docker compose build
 
 Esse roteiro foi executado por script, não pelo navegador.
 
+**Validação da reorganização (T05).** Com as portas 8001–8003 livres:
+
+```sh
+.venv/bin/python scripts/validar_compose.py
+```
+
+O script roda dois cenários independentes. Cada um sobe o projeto do zero,
+envia 45 mensagens concorrentes por três clientes WebSocket, derruba um nó com
+`docker compose kill`, espera a nova visão, envia uma mensagem nova, compara os
+históricos e termina com `docker compose down`. Qualquer falha encerra com
+código 1. Resultado em três execuções em 06/11, a última depois das correções
+da revisão da T05 (OrbStack, Docker 29.8.2):
+
+- queda do líder (nó 3): os nós 1 e 2 ficaram ativos na visão `(2, 2)`, com
+  líder 2, de 4 a 5 segundos após o `kill`;
+- queda de membro comum (nó 1): os nós 2 e 3 ficaram ativos na visão `(2, 3)`,
+  com líder 3, em cerca de 4,6 segundos;
+- nos dois, os históricos ficaram iguais e preservados, e a mensagem nova chegou
+  aos clientes dos dois sobreviventes.
+
+A queda ocorreu com o tráfego já entregue. A recuperação de mensagens em
+trânsito no momento da queda foi testada só na simulação (`tests/`).
+
 ### Ajustes opcionais
 
 Os tempos podem ser mudados por variáveis de ambiente, em segundos:
@@ -195,8 +235,8 @@ e `COORDENADOR_TIMEOUT` (3).
 ## Reprodução para avaliação
 
 O roteiro final deve permitir subir três nós, abrir clientes em nós diferentes,
-observar a ordenação, derrubar o líder e conferir a recuperação. Hoje falta a
-recuperação: depois da queda, os sobreviventes elegem o novo coordenador e
-ficam pausados até a reorganização (T05).
+observar a ordenação, derrubar o líder e conferir a recuperação. Hoje isso está
+coberto pelo teste manual acima e por `scripts/validar_compose.py`. Faltam a
+readmissão do nó que caiu (T06), o painel e o ensaio cronometrado.
 
 O relatório final será escrito em TeX e deverá declarar o uso de IA.
