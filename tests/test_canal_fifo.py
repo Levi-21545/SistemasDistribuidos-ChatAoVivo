@@ -143,6 +143,29 @@ def test_resposta_perdida_e_reenviada_sem_repetir_efeitos():
     assert len(rede.canais[(2, 1)]) - acks_antes == 2  # um ACK por MSG, nenhum pelo retry
 
 
+def test_encerrar_epoca_para_o_retry_e_descarta_a_fila_antiga():
+    """Corte da reorganização: MSG/ACK da época fechada saem do canal; os novos seguem."""
+    receptor = Receptor({"no2": [503] * 1000})  # destino que não aceita a época antiga
+    antigo_1, antigo_2 = pacote(1), pacote(2)
+    novo = pacote(3) | {"epoca": [2, 2]}
+
+    async def corpo(canais):
+        canais[2].enfileirar(antigo_1)
+        canais[2].enfileirar(antigo_2)
+        await esperar(lambda: len(receptor.recebidos) >= 3)  # antigo_1 em retry
+        canais[2].encerrar_epoca([1, 3])
+        receptor.roteiros["no2"] = []  # dali em diante o destino responde 200
+        canais[2].enfileirar(novo)
+        await esperar(lambda: receptor.ids("no2")[-1:] == [novo["pacote_id"]])
+        await asyncio.sleep(0.03)
+
+    canais = asyncio.run(com_canais(httpx.MockTransport(receptor), [2], corpo))
+    ids = receptor.ids("no2")
+    assert set(ids[:-1]) == {antigo_1["pacote_id"]}  # o retry antigo parou; antigo_2 nem foi enviado
+    assert ids[-1] == novo["pacote_id"] and antigo_2["pacote_id"] not in ids
+    assert canais[2].tamanho == 0 and canais[2].bloqueio is None
+
+
 def test_destino_indisponivel_nao_atrasa_os_outros():
     receptor = Receptor({"no3": ["conexao"] * 1000})
     p1, p2, p3 = pacote(1), pacote(2), pacote(3)

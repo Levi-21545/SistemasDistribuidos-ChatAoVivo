@@ -137,24 +137,34 @@ def test_mesmo_uuid_enviado_a_dois_nos_aparece_uma_vez(grupo):
     assert historico(1).count(m["id"]) == 1
 
 
-def test_queda_do_lider_elege_o_no_2_e_mantem_envios_pausados(grupo):
+def test_queda_do_lider_reorganiza_e_retoma_com_o_no_2(grupo):
+    """T05: os sobreviventes elegem o nó 2, instalam a visão (2,2) e voltam a aceitar mensagens.
+
+    Que a eleição sozinha não libera envios antes da barreira é verificado nos testes
+    simulados (test_eleicao e test_reorganizacao), onde a transição pode ser retida.
+    """
     antes = historico(1)
     grupo[3].kill()
     grupo[3].wait()
 
-    esperar(lambda: all(estado(i)["coordenador"] == 2 and estado(i)["estado"] == "reorganizando"
+    esperar(lambda: all(estado(i)["estado"] == "ativo" and estado(i)["visao"]["epoca"] == [2, 2]
                         for i in (1, 2)))
     for i in (1, 2):
         e = estado(i)
-        assert e["suspeitos"] == [3]
-        assert e["visao"]["epoca"] == [1, 3]  # nova visão só com a reorganização (T05)
-    assert historico(1) == historico(2) == antes
+        assert e["visao"] == {"epoca": [2, 2], "lider": 2, "membros": [1, 2]}
+        assert e["coordenador"] == 2 and e["fase"] is None and e["suspeitos"] == []
+    assert historico(1) == historico(2)
+    assert historico(1)[:len(antes)] == antes
 
-    async def tentar_enviar():
-        ws = await cliente(1)
-        await ws.send(json.dumps(msg("depois da queda", "ana")))
-        resposta = json.loads(await asyncio.wait_for(ws.recv(), 5))
-        await ws.close()
-        return resposta
+    nova = msg("depois da queda", "ana")
 
-    assert asyncio.run(tentar_enviar())["tipo"] == "recusada"
+    async def enviar_depois():
+        ws1, ws2 = await cliente(1), await cliente(2)
+        await ws1.send(json.dumps(nova))
+        recebidos = [await coletar_entregas(ws, 1) for ws in (ws1, ws2)]
+        await ws1.close()
+        await ws2.close()
+        return recebidos
+
+    assert asyncio.run(enviar_depois()) == [[nova["id"]], [nova["id"]]]
+    esperar(lambda: historico(1) == historico(2) and historico(1)[-1] == nova["id"])

@@ -21,11 +21,15 @@ class Relogio:
 
 
 class RedeAssincrona:
-    """Envio direto entregue no próximo giro do loop; nós em `mortos` não recebem nem enviam."""
+    """Envio direto entregue no próximo giro do loop; nós em `mortos` não recebem nem enviam.
+
+    Tipos em `retidos` não são entregues: permite isolar a eleição da reorganização.
+    """
 
     def __init__(self):
         self.nos: dict[int, No] = {}
         self.mortos: set[int] = set()
+        self.retidos: set[str] = set()
 
     def para(self, origem):
         rede = self
@@ -37,13 +41,16 @@ class RedeAssincrona:
             def enviar_direto(self, destino, pacote):
                 rede._entregar(origem, destino, pacote)
 
+            def encerrar_epoca(self, epoca):
+                pass  # sem filas: cada pacote é entregue no próximo giro do loop
+
             def tamanhos(self):
                 return {}
 
         return _Rede()
 
     def _entregar(self, origem, destino, pacote):
-        if origem in self.mortos or destino in self.mortos:
+        if origem in self.mortos or destino in self.mortos or pacote["tipo"] in self.retidos:
             return
         asyncio.get_running_loop().call_soon(self.nos[destino].receber_pacote, copy.deepcopy(pacote))
 
@@ -73,6 +80,7 @@ def test_queda_do_lider_elege_o_maior_vivo_sem_liberar_envios():
         relogio = Relogio()
         rede = criar(relogio)
         rede.mortos.add(3)
+        rede.retidos.add("VIEW_PREPARE")  # só a eleição: a reorganização (T05) não avança
 
         # Heartbeats de 1 e 2 continuam; o líder 3 fica em silêncio além do timeout (0,2).
         relogio.t = 0.15
@@ -90,6 +98,7 @@ def test_queda_do_lider_elege_o_maior_vivo_sem_liberar_envios():
             resposta = rede.nos[i].aceitar_do_cliente(mensagem(str(uuid.uuid4()), "depois da eleição"))
             assert resposta["tipo"] == "recusada"  # eleição não libera envios
         assert rede.nos[1].visao.epoca == (1, 3)  # a visão só muda na reorganização (T05)
+        assert rede.nos[1].fase is None  # sem PREPARE, o nó 1 nem chegou ao corte
 
     asyncio.run(cenario())
 

@@ -43,12 +43,18 @@ def foto(rede, no):
         "processados": set(no._processados),
         "estado": no.estado,
         "coordenador": no.coordenador,
+        "fase": no.fase,
+        "transicao": no.estado_publico()["transicao"],
         "canais": {c: list(f) for c, f in rede.canais.items()},
         "diretos": list(rede.diretos),
     }
 
 
-INSTALL = controle("VIEW_INSTALL", transicao=EPOCA, lider=3, membros=[1, 2, 3], historico=[], relogio=0)
+INSTALL = controle("VIEW_INSTALL", transicao=EPOCA, anterior=None, lider=3, membros=[1, 2, 3], historico=[],
+                   relogio=0)
+
+PREPARE = controle("VIEW_PREPARE", origem=3, transicao=[2, 3], anterior=EPOCA, membros=[1, 3])
+STATE = controle("VIEW_STATE", transicao=[2, 3], anterior=EPOCA, historico=[], pendentes=[], relogio=0)
 
 MALFORMADOS = {
     "MSG sem pacote_id": sem(msg(), "pacote_id"),
@@ -88,6 +94,18 @@ MALFORMADOS = {
     "VIEW_INSTALL sem relogio": sem(INSTALL, "relogio"),
     "VIEW_READY transicao null": controle("VIEW_READY", transicao=None),
     "VIEW_RESUME transicao curta": controle("VIEW_RESUME", transicao=[1]),
+    "VIEW_INSTALL sem anterior": sem(INSTALL, "anterior"),
+    "VIEW_INSTALL anterior curta": INSTALL | {"anterior": [1]},
+    "VIEW_PREPARE sem anterior": sem(PREPARE, "anterior"),
+    "VIEW_PREPARE anterior null": PREPARE | {"anterior": None},
+    "VIEW_PREPARE transicao texto": PREPARE | {"transicao": ["2", 3]},
+    "VIEW_PREPARE sem membros": sem(PREPARE, "membros"),
+    "VIEW_PREPARE membros booleanos": PREPARE | {"membros": [True, 3]},
+    "VIEW_STATE sem pendentes": sem(STATE, "pendentes"),
+    "VIEW_STATE pendente malformada": STATE | {"pendentes": [{"epoca": EPOCA, "relogio": 1, "origem": 2}]},
+    "VIEW_STATE historico texto": STATE | {"historico": "[]"},
+    "VIEW_STATE relogio float": STATE | {"relogio": 1.0},
+    "VIEW_STATE sem transicao": sem(STATE, "transicao"),
 }
 
 
@@ -117,6 +135,8 @@ def test_formatos_validos_continuam_aceitos():
         assert no.receber_pacote(controle(tipo))[0] == 200
     for tipo in ("VIEW_READY", "VIEW_RESUME"):
         assert no.receber_pacote(controle(tipo, transicao=EPOCA))[0] == 200
+    assert no.receber_pacote(STATE) == (200, {"ignorado": "estado de transição desconhecida ou já reconciliada"})
+    assert no.receber_pacote(PREPARE)[0] == 200 and no.fase == "corte"  # proposta válida do líder 3
 
 
 def test_controles_com_epoca_null_continuam_aceitos():
@@ -138,4 +158,7 @@ def test_view_install_do_bootstrap_continua_aceito():
     historico = [{"epoca": EPOCA, "relogio": 1, "origem": 3, "mensagem": mensagem(str(uuid.uuid4()), "oi")}]
     install = INSTALL | {"origem": 3, "historico": historico, "relogio": 4}
     assert no.receber_pacote(install) == (200, {"ok": True})
-    assert no.visao.epoca == (1, 3) and len(no.historico) == 1 and no.relogio.valor == 4
+    assert no.visao.epoca == (1, 3) and no.relogio.valor == 4
+    assert no.historico == []  # o histórico instalado só é publicado no VIEW_RESUME
+    assert no.receber_pacote(controle("VIEW_RESUME", origem=3, transicao=EPOCA)) == (200, {"ok": True})
+    assert len(no.historico) == 1
