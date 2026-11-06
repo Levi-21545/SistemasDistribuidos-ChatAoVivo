@@ -1,8 +1,10 @@
 """Transporte HTTP entre nós.
 
 - MSG e ACK passam por um CanalFIFO por destino: um POST por vez, e a fila só
-  avança depois de uma resposta 200. Falha de transporte ou 503 repete o mesmo
-  pacote (mesmo pacote_id); o receptor deduplica e responde sem repetir efeitos.
+  avança depois de uma resposta 200. Falha de transporte, timeout ou 5xx repete
+  o mesmo pacote (mesmo pacote_id); o receptor deduplica e responde sem repetir
+  efeitos. Qualquer outra resposta (como 400) para o canal naquele pacote, sem
+  descartá-lo nem deixar o próximo passar à frente.
 - Mensagens de controle (heartbeat, eleição, visão) usam envio direto, com uma
   única tentativa. Elas são idempotentes e reenviadas pela própria lógica do nó.
 """
@@ -27,6 +29,7 @@ class CanalFIFO:
         self._cfg = cfg
         self._fila: asyncio.Queue[dict] = asyncio.Queue()
         self._tarefa: asyncio.Task | None = None
+        self.bloqueio: dict | None = None  # pacote recusado e motivo; o canal não avança
 
     def iniciar(self) -> None:
         self._tarefa = asyncio.create_task(self._executar())
@@ -45,21 +48,31 @@ class CanalFIFO:
     async def _executar(self) -> None:
         while True:
             pacote = await self._fila.get()
-            await self._entregar(pacote)
+            motivo = await self._entregar(pacote)
+            if motivo:
+                # Recusa permanente (defeito no código): repetir não resolve, e pular o
+                # pacote quebraria o FIFO. O canal para aqui; os outros destinos seguem.
+                self.bloqueio = {"pacote": pacote, "motivo": motivo}
+                log.error("canal para o nó %s parado em %s: %s", self.destino, pacote["pacote_id"], motivo)
+                return
 
-    async def _entregar(self, pacote: dict) -> None:
-        """Repete o mesmo pacote até o destino responder 200."""
+    async def _entregar(self, pacote: dict) -> str | None:
+        """Repete o mesmo pacote até o destino responder 200.
+
+        Devolve None no sucesso ou o motivo de uma recusa permanente.
+        """
         espera = self._cfg.retry_inicial
         while True:
             try:
                 resposta = await self._cliente.post(self._url, json=pacote)
                 if resposta.status_code == 200:
-                    return
-                if resposta.status_code != 503:
-                    # 4xx indica pacote malformado (defeito no código): repetir não resolve.
-                    log.error("nó %s recusou %s: %s %s", self.destino, pacote["pacote_id"],
-                              resposta.status_code, resposta.text)
-                    return
+                    return None
+                if resposta.status_code < 500:
+                    return f"HTTP {resposta.status_code} {resposta.text}"
+                
+                log.debug("nó %s respondeu %s a %s; repetindo", self.destino, resposta.status_code,
+                          pacote["pacote_id"])
+                
             except httpx.HTTPError as erro:
                 log.debug("falha ao enviar %s para nó %s: %r", pacote["pacote_id"], self.destino, erro)
             await asyncio.sleep(espera)
