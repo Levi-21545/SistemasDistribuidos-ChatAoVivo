@@ -135,11 +135,16 @@ class No:
     # ------------------------------------------------------------------ pacotes
 
     def receber_pacote(self, pacote: dict) -> Resposta:
-        tratador = self._tratadores.get(pacote.get("tipo"))
+        tipo = pacote.get("tipo")
+        tratador = self._tratadores.get(tipo) if isinstance(tipo, str) else None
         if tratador is None:
-            return 400, {"erro": f"tipo desconhecido: {pacote.get('tipo')!r}"}
-        if pacote.get("origem") not in self.cfg.nos:
+            return 400, {"erro": f"tipo desconhecido: {tipo!r}"}
+        if not _inteiro(pacote.get("origem")) or pacote["origem"] not in self.cfg.nos:
             return 400, {"erro": "origem desconhecida"}
+        # Valida tudo antes de qualquer efeito: o tratador não pode falhar no meio.
+        erro = erro_de_formato(pacote)
+        if erro:
+            return 400, {"erro": f"pacote malformado: {erro}"}
         dados = pacote["tipo"] in ("MSG", "ACK")
         if dados and pacote.get("pacote_id") in self._processados:
             return 200, {"duplicado": True}
@@ -458,3 +463,66 @@ class No:
             "ultimo_contato": {p: round(agora - t, 2) for p, t in sorted(self.ultimo_contato.items())},
             "filas_saida": self.rede.tamanhos(),
         }
+
+
+# ---------------------------------------------------------------------- formato
+
+def _inteiro(valor) -> bool:
+    """int de fato: bool é subclasse de int, mas True não é um relógio nem um ID."""
+    return type(valor) is int
+
+
+def _epoca(valor) -> bool:
+    return isinstance(valor, list) and len(valor) == 2 and all(_inteiro(v) for v in valor)
+
+
+def _mensagem(valor) -> bool:
+    return validar_mensagem(valor)[1] is None
+
+
+def _ref_evento(valor) -> bool:
+    return isinstance(valor, dict) and _inteiro(valor.get("origem")) and _inteiro(valor.get("relogio"))
+
+
+def _evento_json(valor) -> bool:
+    return (isinstance(valor, dict) and _epoca(valor.get("epoca")) and _ref_evento(valor)
+            and _mensagem(valor.get("mensagem")))
+
+
+def _lista(item_valido):
+    return lambda valor: isinstance(valor, list) and all(item_valido(v) for v in valor)
+
+
+# Campos de cada tipo além do envelope (contrato v1), com o teste de cada um.
+_CAMPOS = {
+    "MSG": {"relogio": _inteiro, "mensagem": _mensagem},
+    "ACK": {"relogio": _inteiro, "evento": _ref_evento},
+    "HEARTBEAT": {"estado": lambda v: v in (SINCRONIZANDO, ATIVO, REORGANIZANDO),
+                  "coordenador": lambda v: v is None or _inteiro(v)},
+    "ELECTION": {},
+    "OK": {},
+    "COORDINATOR": {},
+    "VIEW_INSTALL": {"transicao": _epoca, "lider": _inteiro, "membros": _lista(_inteiro),
+                     "historico": _lista(_evento_json), "relogio": _inteiro},
+    "VIEW_READY": {"transicao": _epoca},
+    "VIEW_RESUME": {"transicao": _epoca},
+}
+
+
+def erro_de_formato(pacote: dict) -> str | None:
+    """Confere o envelope e os campos do tipo; devolve o problema ou None.
+
+    `tipo` e `origem` já foram conferidos por receber_pacote.
+    """
+    if not isinstance(pacote.get("pacote_id"), str) or not pacote["pacote_id"]:
+        return "pacote_id deve ser um texto não vazio"
+    if "epoca" not in pacote:
+        return "epoca ausente"
+    # Época null só vale nos controles: um nó sem visão ainda envia heartbeat.
+    nula_permitida = pacote["tipo"] not in ("MSG", "ACK")
+    if not (_epoca(pacote["epoca"]) or (pacote["epoca"] is None and nula_permitida)):
+        return "epoca deve ser [contador, coordenador]" + (" ou null" if nula_permitida else "")
+    for campo, valido in _CAMPOS[pacote["tipo"]].items():
+        if campo not in pacote or not valido(pacote[campo]):
+            return f"{campo} ausente ou inválido"
+    return None
