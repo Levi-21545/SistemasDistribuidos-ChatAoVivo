@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat com ordenação</title>
+<style>
+  :root {
+    --fundo: #eef1f6;
+    --painel: #ffffff;
+    --borda: #dfe3ea;
+    --texto: #1c2430;
+    --suave: #6b7686;
+    --destaque: #4f46e5;
+    --destaque-texto: #ffffff;
+    --balao-outro: #ffffff;
+    --verde: #16a34a;
+    --ambar: #d97706;
+    --cinza: #94a3b8;
+    --vermelho: #dc2626;
+    --sombra: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 16px rgba(15, 23, 42, .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #0f141b;
+      --painel: #171d26;
+      --borda: #262f3c;
+      --texto: #e6eaf0;
+      --suave: #8b96a8;
+      --destaque: #6366f1;
+      --balao-outro: #1f2733;
+      --sombra: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--fundo); color: var(--texto);
+    display: flex; justify-content: center;
+  }
+  .app {
+    width: 100%; max-width: 860px; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--painel); box-shadow: var(--sombra);
+  }
+
+  /* Cabeçalho */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px; border-bottom: 1px solid var(--borda);
+  }
+  .logo {
+    width: 40px; height: 40px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, #6366f1, #06b6d4);
+    display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px;
+  }
+  .titulo { flex: 1; min-width: 0; }
+  .titulo h1 { margin: 0; font-size: 17px; }
+  .titulo .sala { color: var(--suave); font-size: 13px; }
+  .eu {
+    border: 1px solid var(--borda); background: transparent; color: var(--texto);
+    border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .eu:hover { border-color: var(--destaque); }
+
+  /* Faixa de estado do nó */
+  .estado {
+    display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center;
+    padding: 8px 20px; font-size: 12.5px; color: var(--suave);
+    border-bottom: 1px solid var(--borda); background: color-mix(in srgb, var(--fundo) 50%, var(--painel));
+  }
+  .estado b { color: var(--texto); font-weight: 600; }
+  .pilula {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px; font-weight: 600; color: var(--texto);
+    background: var(--painel); border: 1px solid var(--borda);
+  }
+  .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--cinza); }
+  .ativo .ponto { background: var(--verde); box-shadow: 0 0 0 3px color-mix(in srgb, var(--verde) 25%, transparent); }
+  .reorganizando .ponto { background: var(--ambar); animation: pulsar 1s infinite; }
+  .desconectado .ponto { background: var(--vermelho); }
+  @keyframes pulsar { 50% { opacity: .35; } }
+
+  /* Mensagens */
+  main { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 2px; }
+  .vazio { margin: auto; text-align: center; color: var(--suave); }
+  .vazio div { font-size: 40px; margin-bottom: 8px; }
+  .linha { display: flex; gap: 10px; align-items: flex-end; max-width: 78%; margin-top: 2px; }
+  .linha.nova-autoria { margin-top: 12px; }
+  .linha.minha { align-self: flex-end; flex-direction: row-reverse; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%; flex: none;
+    display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700;
+  }
+  .avatar.oculto { visibility: hidden; }
+  .linha.minha .avatar { display: none; }
+  .balao {
+    padding: 8px 12px; border-radius: 16px; background: var(--balao-outro);
+    border: 1px solid var(--borda); line-height: 1.4; overflow-wrap: anywhere;
+  }
+  .linha:not(.minha) .balao { border-bottom-left-radius: 6px; }
+  .linha.minha .balao { background: var(--destaque); color: var(--destaque-texto); border-color: transparent; border-bottom-right-radius: 6px; }
+  .autor { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+  .meta { font-size: 11px; opacity: .65; margin-top: 3px; text-align: right; white-space: nowrap; }
+  .linha.pendente .balao { opacity: .6; }
+  .linha.recusada .balao { background: transparent; color: var(--texto); border: 1px dashed var(--vermelho); cursor: pointer; }
+  .linha.recusada .meta { color: var(--vermelho); opacity: 1; }
+
+  /* Campo de envio */
+  #form { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--borda); }
+  #texto {
+    flex: 1; padding: 12px 16px; border-radius: 999px; border: 1px solid var(--borda);
+    background: var(--fundo); color: var(--texto); font: inherit; outline: none;
+  }
+  #texto:focus { border-color: var(--destaque); }
+  .enviar {
+    border: 0; border-radius: 999px; padding: 0 20px; font: inherit; font-weight: 600;
+    background: var(--destaque); color: var(--destaque-texto); cursor: pointer;
+  }
+  .enviar:disabled { opacity: .5; cursor: default; }
+
+  /* Aviso flutuante */
+  .aviso {
+    position: fixed; left: 50%; bottom: 90px; transform: translate(-50%, 20px);
+    background: #1e293b; color: #fff; padding: 10px 16px; border-radius: 10px;
+    font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; max-width: 90vw;
+  }
+  .aviso.visivel { opacity: 1; transform: translate(-50%, 0); }
+
+  /* Janela do apelido */
+  dialog { border: 0; border-radius: 16px; padding: 24px; background: var(--painel); color: var(--texto); box-shadow: var(--sombra); width: min(360px, 90vw); }
+  dialog::backdrop { background: rgba(15, 23, 42, .45); }
+  dialog h2 { margin: 0 0 6px; font-size: 18px; }
+  dialog p { margin: 0 0 16px; color: var(--suave); font-size: 14px; }
+  dialog input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); font: inherit; }
+  dialog .enviar { margin-top: 14px; width: 100%; padding: 10px; }
+
+  @media (max-width: 560px) {
+    header, .estado, #form { padding-left: 16px; padding-right: 16px; }
+    main { padding: 16px; }
+    .linha { max-width: 90%; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">#</div>
+    <div class="titulo">
+      <h1>Chat com ordenação</h1>
+      <div class="sala">#geral · <span id="conexao">conectando…</span></div>
+    </div>
+    <button class="eu" id="eu" title="Trocar apelido">👤 <span id="apelido-atual">—</span></button>
+  </header>
+
+  <div class="estado">
+    <span class="pilula desconectado" id="pilula"><span class="ponto"></span><span id="estado-no">desconectado</span></span>
+    <span>líder <b id="lider">—</b></span>
+    <span>época <b id="epoca">—</b></span>
+    <span>relógio <b id="relogio">—</b></span>
+    <span>mensagens <b id="total">0</b></span>
+  </div>
+
+  <main id="mensagens"></main>
+
+  <form id="form" autocomplete="off">
+    <input id="texto" placeholder="Escreva uma mensagem…" maxlength="2000">
+    <button class="enviar" id="botao">Enviar</button>
+  </form>
+</div>
+
+<dialog id="janela-apelido">
+  <form method="dialog" id="form-apelido">
+    <h2>Como quer ser chamado?</h2>
+    <p>Esse nome aparece nas suas mensagens.</p>
+    <input id="campo-apelido" maxlength="30" required>
+    <button class="enviar">Entrar no chat</button>
+  </form>
+</dialog>
+
+<div class="aviso" id="aviso"></div>
+
+<script>
+// Cada tentativa tem um UUID preservado nos reenvios.
+// A mensagem só é considerada confirmada quando o nó a entrega.
+const pendentes = new Map();   // id -> { mensagem, recusada, motivo }
+const entregues = new Set();
+let historico = [];
+let ws;
+let apelido = lerApelido();
+
+const $ = (id) => document.getElementById(id);
+
+function lerApelido() {
+  // ?apelido=Nome na URL permite abrir abas com pessoas diferentes na demonstração.
+  const daUrl = new URLSearchParams(location.search).get("apelido");
+  if (daUrl) return daUrl.trim().slice(0, 30);
+  try { return localStorage.getItem("apelido") || ""; } catch { return ""; }
+}
+
+function salvarApelido(nome) {
+  apelido = nome.trim();
+  try { localStorage.setItem("apelido", apelido); } catch {}
+  $("apelido-atual").textContent = apelido;
+  desenhar();
+}
+
+function novoUUID() {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+
+function corDoAutor(nome) {
+  let h = 0;
+  for (const c of nome) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 60% 48%)`;
+}
+
+function iniciais(nome) {
+  const partes = nome.trim().split(/\s+/);
+  return ((partes[0]?.[0] || "") + (partes[1]?.[0] || "")).toUpperCase() || "?";
+}
+
+function elemento(tag, classe, texto) {
+  const el = document.createElement(tag);
+  if (classe) el.className = classe;
+  if (texto !== undefined) el.textContent = texto;
+  return el;
+}
+
+function linhaDeMensagem(m, meta, extraClasse, anterior) {
+  const minha = m.autor === apelido;
+  const continua = anterior && anterior.autor === m.autor;
+  const linha = elemento("div", "linha" + (minha ? " minha" : "") + (continua ? "" : " nova-autoria") + (extraClasse ? " " + extraClasse : ""));
+
+  const avatar = elemento("div", "avatar" + (continua ? " oculto" : ""), iniciais(m.autor));
+  avatar.style.background = corDoAutor(m.autor);
+
+  const balao = elemento("div", "balao");
+  if (!minha && !continua) {
+    const autor = elemento("div", "autor", m.autor);
+    autor.style.color = corDoAutor(m.autor);
+    balao.append(autor);
+  }
+  balao.append(elemento("div", "", m.texto), elemento("div", "meta", meta));
+  linha.append(avatar, balao);
+  return linha;
+}
+
+function desenhar() {
+  const area = $("mensagens");
+  const noFim = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
+  area.replaceChildren();
+
+  if (!historico.length && !pendentes.size) {
+    const vazio = elemento("div", "vazio");
+    vazio.append(elemento("div", "", "💬"), elemento("span", "", "Nenhuma mensagem ainda. Diga oi!"));
+    area.append(vazio);
+  }
+
+  let anterior = null;
+  for (const e of historico) {
+    area.append(linhaDeMensagem(e.mensagem, `#${e.posicao} · relógio (${e.relogio}, nó ${e.origem})`, "", anterior));
+    anterior = e.mensagem;
+  }
+  for (const [id, p] of pendentes) {
+    const meta = p.recusada ? `⚠ ${p.motivo} · toque para reenviar` : "🕓 enviando…";
+    const linha = linhaDeMensagem(p.mensagem, meta, p.recusada ? "recusada" : "pendente", anterior);
+    if (p.recusada) linha.onclick = () => reenviar(id);
+    area.append(linha);
+    anterior = p.mensagem;
+  }
+
+  $("total").textContent = historico.length;
+  if (noFim) area.scrollTop = area.scrollHeight;
+}
+
+function registrarEntrega(evento, posicao) {
+  const id = evento.mensagem.id;
+  if (entregues.has(id)) return;
+  entregues.add(id);
+  pendentes.delete(id);
+  historico.push({ ...evento, posicao });
+}
+
+function avisar(texto) {
+  const aviso = $("aviso");
+  aviso.textContent = texto;
+  aviso.classList.add("visivel");
+  clearTimeout(avisar.timer);
+  avisar.timer = setTimeout(() => aviso.classList.remove("visivel"), 3500);
+}
+
+function enviar(id) {
+  const p = pendentes.get(id);
+  if (p && ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(p.mensagem));
+}
+
+function reenviar(id) {
+  const p = pendentes.get(id);
+  if (!p) return;
+  p.recusada = false;
+  enviar(id);  // mesmo UUID: o nó nunca duplica a mensagem
+  desenhar();
+}
+
+function conectar() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.tipo === "historico") {
+      historico = []; entregues.clear();
+      d.mensagens.forEach((m, i) => registrarEntrega(m, i + 1));
+      $("conexao").textContent = `conectado ao nó ${d.no}`;
+      for (const id of pendentes.keys()) reenviar(id);
+    } else if (d.tipo === "entregue") {
+      registrarEntrega(d, d.posicao);
+    } else if (d.tipo === "confirmada") {
+      pendentes.delete(d.id);
+    } else if (d.tipo === "recusada") {
+      const p = pendentes.get(d.id);
+      if (p) { p.recusada = true; p.motivo = d.motivo; }
+      avisar(`Mensagem recusada: ${d.motivo}`);
+    }
+    desenhar();
+  };
+  ws.onclose = () => {
+    $("conexao").textContent = "desconectado, tentando de novo…";
+    mostrarEstado(null);
+    setTimeout(conectar, 1000);
+  };
+}
+
+function mostrarEstado(e) {
+  const pilula = $("pilula");
+  const estado = e ? e.estado : "desconectado";
+  pilula.className = "pilula " + estado;
+  $("estado-no").textContent = e ? `nó ${e.no} · ${estado}` : "desconectado";
+  $("lider").textContent = e && e.coordenador != null ? `nó ${e.coordenador}` : "—";
+  $("epoca").textContent = e && e.visao ? `(${e.visao.epoca.join(", ")})` : "—";
+  $("relogio").textContent = e ? e.relogio : "—";
+  $("botao").disabled = !e || e.estado !== "ativo";
+}
+
+async function atualizarEstado() {
+  try {
+    const resposta = await fetch("/estado", { cache: "no-store" });
+    mostrarEstado(await resposta.json());
+  } catch {
+    mostrarEstado(null);
+  }
+}
+
+$("form").onsubmit = (e) => {
+  e.preventDefault();
+  const texto = $("texto").value.trim();
+  if (!texto) return;
+  if (!apelido) { $("janela-apelido").showModal(); return; }
+  const mensagem = { id: novoUUID(), sala: "geral", autor: apelido, texto };
+  pendentes.set(mensagem.id, { mensagem, recusada: false });
+  enviar(mensagem.id);
+  $("texto").value = "";
+  desenhar();
+};
+
+$("eu").onclick = () => { $("campo-apelido").value = apelido; $("janela-apelido").showModal(); };
+$("form-apelido").onsubmit = () => {
+  const nome = $("campo-apelido").value.trim();
+  if (nome) salvarApelido(nome);
+  $("texto").focus();
+};
+
+$("apelido-atual").textContent = apelido || "—";
+if (!apelido) $("janela-apelido").showModal();
+desenhar();
+conectar();
+atualizarEstado();
+setInterval(atualizarEstado, 1500);
+</script>
+</body>
+</html>

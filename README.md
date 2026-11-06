@@ -2,10 +2,16 @@
 
 Trabalho final de Sistemas Distribuídos de 2026, por Levi, Henri, André e Gabriel.
 
-O projeto está na fase de direcionamento. A documentação é um esboço revisável;
-ainda não há aplicação implementada nem testes de execução.
+Implementados (aguardando revisão do grupo): transporte FIFO com retry,
+multicast ordenado por Lamport, heartbeat, eleição Bully e bootstrap da visão
+inicial (T02–T04). Pendentes: reorganização após queda, reentrada, painel e
+validação no Compose (T05–T10).
 
 ## Por onde começar
+
+- [app/](app/): código do nó. `no.py` reúne as regras; `ordenacao.py`, a fila
+  do multicast; `transporte.py`, os canais FIFO; `main.py`, as rotas.
+- [tests/](tests/): testes unitários, simulação de rede e integração.
 
 - [Documento de protocolo em TeX](docs/protocolo.tex): formatos de mensagens,
   fluxos de comunicação, confirmação e recuperação proposta.
@@ -51,11 +57,48 @@ O repositório deve ter commits dos quatro integrantes. A demonstração dispõe
 oito minutos, seguidos por quatro de perguntas. Um vídeo de reserva de três a
 quatro minutos é opcional. A logística da demonstração ainda será alinhada.
 
+## Execução
+
+Com Docker (não verificado ainda; o ambiente de desenvolvimento não tinha Docker):
+
+```sh
+docker compose up --build
+```
+
+Clientes em <http://localhost:8001>, <http://localhost:8002> e <http://localhost:8003>.
+Estado de cada nó em `/estado` e histórico em `/historico`.
+Para derrubar o líder: `docker compose kill no3`.
+
+Sem Docker, com Python 3.13, um terminal por nó:
+
+```sh
+python -m venv .venv
+.venv/Scripts/pip install -r requirements-dev.txt   # Linux/macOS: .venv/bin/pip
+
+# repetir com NO_ID=2/porta 8002 e NO_ID=3/porta 8003
+NO_ID=1 NOS="1=http://127.0.0.1:8001,2=http://127.0.0.1:8002,3=http://127.0.0.1:8003"   .venv/Scripts/python -m uvicorn app.main:app --port 8001
+```
+
+No PowerShell, defina as variáveis com `$env:NO_ID="1"` e `$env:NOS="..."`.
+Os três nós precisam estar no ar para o bootstrap da visão inicial.
+Tempos opcionais: `HEARTBEAT_INTERVALO`, `SUSPEITA_TIMEOUT`, `ELEICAO_TIMEOUT`,
+`COORDENADOR_TIMEOUT` (segundos).
+
+## Testes
+
+```sh
+.venv/Scripts/python -m pytest                 # tudo (cerca de 25 s)
+.venv/Scripts/python -m pytest -m "not integracao"   # sem subir processos
+```
+
+O teste de integração sobe três processos uvicorn nas portas 18001–18003,
+envia mensagens concorrentes por WebSocket e derruba o líder.
+
 ## Reprodução para avaliação
 
-Os comandos de instalação, execução, testes e demonstração de falha serão
-acrescentados aqui conforme a implementação existir e for verificada.
 O roteiro final deve permitir subir três nós, abrir clientes em nós diferentes,
-observar a ordenação, derrubar o líder e conferir a recuperação.
+observar a ordenação, derrubar o líder e conferir a recuperação. Hoje, depois
+da queda do líder, os sobreviventes elegem o novo coordenador e ficam pausados:
+a retomada depende da reorganização (T05).
 
 O relatório final será escrito em TeX e deverá declarar o uso de IA.

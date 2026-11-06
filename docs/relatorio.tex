@@ -12,7 +12,7 @@
 \newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
 \title{Chat com ordenação\\\large Relatório -- esboço inicial}
 \author{Levi \and Henri \and André \and Gabriel}
-\date{29 de outubro de 2026}
+\date{5 de novembro de 2026}
 \begin{document}
 \maketitle
 \vspace{-1.4em}
@@ -20,7 +20,8 @@
 \textbf{Estado.} Este arquivo organiza o relatório pedido no enunciado.
 A versão final deverá ter 4 a 6 páginas, com a solução realmente implementada,
 as decisões efetivas e os testes executados. A extensão atual é provisória.
-Ainda não há aplicação ou resultados de execução.
+Em 5/11 estão implementados transporte, ordenação, heartbeat, Bully e bootstrap
+(T02--T04); reorganização, reentrada, painel e Compose validado seguem pendentes.
 
 \section{Objetivo e arquitetura proposta}
 Construir um chat cuja mesma sequência de mensagens seja entregue aos clientes
@@ -110,12 +111,13 @@ Como base para essa discussão:
 Perspectives on the CAP Theorem}.
 
 \section{Validação planejada e resultados}
-Nenhum cenário abaixo foi executado. Na versão final, registrar condições,
-comandos, resultado real e evidência de cada teste selecionado.
+Na versão final, registrar condições, comandos, resultado real e evidência
+de cada teste selecionado. A coluna abaixo ainda descreve o esperado; os
+resultados parciais estão no parágrafo seguinte.
 
 \begin{tabularx}{\linewidth}{@{}lX@{}}
 \toprule
-Cenário planejado & Comportamento esperado, ainda não verificado \\
+Cenário planejado & Comportamento esperado \\
 \midrule
 Concorrência & Clientes em nós diferentes recebem a mesma sequência. \\
 Retry & Repetir um pacote após resposta perdida não repete seus efeitos. \\
@@ -127,8 +129,18 @@ Um sobrevivente & O sistema interrompe a aceitação de novas mensagens. \\
 \bottomrule
 \end{tabularx}
 
-\textbf{Resultados atuais.} Implementação e validação em execução pendentes.
-Compilar os documentos não valida os algoritmos ou a recuperação.
+\textbf{Resultados atuais (5/11, \msg{pytest} em \msg{tests/}).}
+Concorrência e retry: em uma simulação em memória com 200 sementes, que intercala
+canais ao acaso, mantém FIFO em cada canal e repete pacotes, os três nós entregaram
+a mesma sequência, sem perdas nem duplicatas. Defeitos injetados de propósito
+fizeram esses testes falharem. Com três processos reais em \msg{localhost},
+três clientes WebSocket enviaram 45 mensagens concorrentes e receberam a mesma
+sequência. O mesmo UUID enviado a dois nós entrou uma vez no histórico.
+Queda do líder: ao matar o processo do nó 3, os nós 1 e 2 suspeitaram após o
+timeout, elegeram o nó 2 por Bully e continuaram recusando novos envios, como
+previsto até a reorganização (T05). Mensagens em trânsito, reentrada e um
+sobrevivente ainda não foram testados. O Compose não foi executado: o ambiente
+usado não tinha Docker.
 
 \textbf{Revisão do esboço.} Foi examinado um exemplo com queda do nó 3:
 o nó 1 entregou uma mensagem que ainda era pendência do nó 2, e uma segunda
@@ -138,8 +150,9 @@ bloqueio diante de um prefixo incompatível. Não houve execução dos nós, da 
 ou do protocolo; essa conferência não demonstra sua correção geral.
 
 \section{Limitações e pontos a consolidar}
-Ainda é necessário revisar o bootstrap, os formatos exatos, a confirmação ao
-cliente, a deduplicação entre nós, a fronteira de congelamento e a reconciliação.
+Bootstrap, formatos, confirmação ao cliente e deduplicação entre nós foram
+fechados na v1 do protocolo. O bootstrap exige os três nós. Ainda é necessário
+definir a fronteira de congelamento e a reconciliação.
 Partições, falsas suspeitas persistentes e novas falhas durante reorganização
 ficam fora da garantia inicial. As limitações efetivas devem ser reavaliadas
 conforme a implementação e os experimentos.

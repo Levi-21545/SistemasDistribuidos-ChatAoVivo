@@ -1,0 +1,25 @@
+# Três nós equivalentes. Os nomes no1..no3 são resolvidos pelo DNS do Compose.
+# Cliente web: http://localhost:8001, :8002 e :8003.
+x-no: &no
+  build: .
+  restart: "no"
+
+services:
+  no1:
+    <<: *no
+    environment:
+      NO_ID: "1"
+      NOS: "1=http://no1:8000,2=http://no2:8000,3=http://no3:8000"
+    ports: ["8001:8000"]
+  no2:
+    <<: *no
+    environment:
+      NO_ID: "2"
+      NOS: "1=http://no1:8000,2=http://no2:8000,3=http://no3:8000"
+    ports: ["8002:8000"]
+  no3:
+    <<: *no
+    environment:
+      NO_ID: "3"
+      NOS: "1=http://no1:8000,2=http://no2:8000,3=http://no3:8000"
+    ports: ["8003:8000"]

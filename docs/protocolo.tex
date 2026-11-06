@@ -10,16 +10,17 @@
 \setlength{\parskip}{5pt}
 \setlist{nosep,leftmargin=*}
 \newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
-\title{Chat com ordenação\\\large Documento de protocolo -- esboço v0}
+\title{Chat com ordenação\\\large Documento de protocolo -- v1}
 \author{Levi \and Henri \and André \and Gabriel}
-\date{29 de outubro de 2026}
+\date{5 de novembro de 2026}
 \begin{document}
 \maketitle
 \vspace{-1.4em}
 
-\textbf{Estado.} Esboço revisável, sem implementação nem validação em execução.
-Os campos e comportamentos abaixo orientam a primeira versão; decisões abertas
-devem ser resolvidas antes de tratar o protocolo como contrato definitivo.
+\textbf{Estado.} A v1 fecha o contrato da operação normal, do heartbeat, do
+Bully e do bootstrap (seções 2 e 4), implementados em \msg{app/} e testados
+localmente (seção 5). A reorganização e a reentrada (seção 3) continuam como
+proposta, a implementar em T05 e T06. O texto ainda depende da revisão do grupo.
 Arquitetura e justificativas ficam em \msg{docs/relatorio.tex}.
 
 \section{Escopo e transporte}
@@ -32,7 +33,7 @@ A recuperação proposta pressupõe uma queda por vez, rede funcionando entre os
 sobreviventes e nenhuma nova falha durante reorganização ou sincronização.
 São necessários dois dos três nós para operar. O relatório detalha os limites.
 
-\section{Protocolo v0: operação normal}
+\section{Operação normal}
 \textbf{Identidade e visão.} Cada nó tem ID 1, 2 ou 3.
 Uma visão contém época, líder e membros ativos. A época é proposta como o par
 (contador, ID do coordenador), que distingue propostas sem substituir acordo
@@ -68,8 +69,8 @@ daquela visão. O UUID é registrado no histórico e os clientes locais são avi
 
 \textbf{Confirmação.} O nó do cliente confirma a mensagem quando a entrega.
 Receber pelo WebSocket ou responder a um POST não confirma entrega.
-Na reconexão, o cliente consulta ou reenvia usando o mesmo UUID.
-Os detalhes desse contrato com o navegador ainda serão fechados.
+Na reconexão, o cliente reenvia usando o mesmo UUID; o reenvio também serve
+de consulta. O contrato com o navegador está na seção 4.
 
 \textbf{Relógio.} Modela os eventos da camada \msg{MSG}/\msg{ACK}.
 Heartbeats ficam fora dessa ordenação. Dentro de uma visão, a chave é
@@ -87,15 +88,38 @@ O handler não espera respostas de outros nós para concluir o processamento loc
 
 A deduplicação ocorre no transporte e na entrega. Pacotes repetidos não geram
 novo evento nem nova emissão de ACK; um UUID entregue não reaparece no histórico.
-A identidade dos pacotes após reinício e a tentativa simultânea por nós distintos
-precisam de detalhamento antes da implementação.
+
+\textbf{Identidade após reinício.} O \msg{pacote_id} tem a forma
+\texttt{<origem>-<encarnação>-<sequência>}. A encarnação é sorteada a cada início
+do processo; um nó reiniciado nunca repete um identificador antigo.
+
+\textbf{Mesmo UUID em nós distintos.} Se o cliente reenviar a mesma tentativa a
+outro nó antes da entrega, podem existir dois eventos com o mesmo UUID. Ambos
+seguem a ordem total, e todos os nós entregam somente a primeira ocorrência,
+descartando as seguintes na entrega. Como todos veem a mesma sequência, todos
+descartam a mesma ocorrência. Dentro de um nó, UUID repetido com conteúdo igual
+não cria novo evento; com conteúdo diferente é recusado.
 
 \subsection*{Heartbeat e eleição}
-Parâmetros iniciais: heartbeat a cada 1 segundo e suspeita após 3 segundos.
+Parâmetros padrão: heartbeat a cada 1 segundo e suspeita após 3 segundos sem
+heartbeat; espera de \msg{OK} de 1 segundo e de \msg{COORDINATOR} de 3 segundos.
 São configuráveis e não representam prazo garantido de recuperação.
-Com líder disponível, ele coordena a reorganização. Se ele for suspeito, os
-membros ativos executam Bully com \msg{ELECTION}, \msg{OK} e \msg{COORDINATOR}.
-Nós sincronizando ficam fora da eleição. Vencer não libera envios automaticamente.
+Heartbeats vão a todos os nós configurados, inclusive fora da visão.
+
+A suspeita de qualquer membro passa o nó a \emph{reorganizando}: novos envios
+de clientes são recusados, enquanto MSG e ACK da visão atual continuam sendo
+processados até a pausa da transição. Com líder disponível, ele coordena a
+reorganização. Se o coordenador for suspeito, os membros com visão executam
+Bully com \msg{ELECTION}, \msg{OK} e \msg{COORDINATOR}: \msg{ELECTION} vai aos
+membros de ID maior não suspeitos; sem \msg{OK}, o nó se anuncia; com \msg{OK}
+e sem anúncio dentro do prazo, repete a eleição. Quem recebe \msg{ELECTION} de
+ID menor responde \msg{OK} e inicia a própria eleição. Um anúncio de ID menor
+recebido por um nó vivo de ID maior provoca nova eleição.
+
+Mensagens de eleição de outra época são ignoradas. Nós sincronizando não
+respondem nem votam. Vencer só define o coordenador da próxima transição: a
+visão e a época permanecem, e os envios continuam pausados até a retomada.
+Suspeitas são permanentes até a próxima instalação de visão.
 
 \section{Reorganização e reentrada: proposta a revisar}
 A transição fecha a visão antiga antes de retomar a aplicação.
@@ -185,38 +209,79 @@ entregues, visão e relógio antes de entrar no grupo ativo.
 Depois pode participar de uma eleição Bully, inclusive se tiver o maior ID.
 
 
-\section{Mensagens de controle}
-Os tipos abaixo também usam o envelope comum. O payload exato, a validação
-dos campos e as respostas HTTP ainda serão definidos.
+\section{Contrato v1}
+\textbf{Rotas.} Entre nós: \msg{POST /interno/pacote}, corpo JSON com o
+envelope. Clientes: WebSocket em \msg{/ws}. Observação: \msg{GET /estado} e
+\msg{GET /historico}. Época é a lista \msg{[contador, coordenador]}, ou
+\msg{null} enquanto o nó não tem visão. Todos os pacotes levam \msg{tipo},
+\msg{pacote_id}, \msg{epoca} e \msg{origem}.
 
 \begin{tabularx}{\linewidth}{@{}lX@{}}
 \toprule
-Tipo & Conteúdo ou função pretendida \\
+Tipo & Campos além do envelope e função \\
 \midrule
-\msg{HEARTBEAT} & Sinal de vida; campos de estado a fechar. \\
-\msg{ELECTION} / \msg{OK} & Iniciar eleição e responder como candidato de ID maior. \\
-\msg{COORDINATOR} & Anunciar o vencedor, sem liberar envios da aplicação. \\
-\msg{VIEW_PREPARE} & Identificar a transição e os membros propostos. \\
-\msg{VIEW_STATE} & Informar histórico, pendências e relógio após o corte. \\
-\msg{VIEW_INSTALL} & Distribuir época, membros, histórico e relógio de referência. \\
-\msg{VIEW_READY} & Confirmar a instalação da transição correspondente. \\
-\msg{VIEW_RESUME} & Liberar a operação após a confirmação de todos. \\
-\msg{JOIN} & Solicitar admissão de um nó em sincronização. \\
-\msg{SNAPSHOT} & Transferir histórico, UUIDs entregues, visão e relógio. \\
+\msg{MSG} & \msg{relogio} (carimbo original), \msg{mensagem} \{id, sala, autor, texto\}. \\
+\msg{ACK} & \msg{relogio} (do emissor), \msg{evento} \{origem, relogio\}; época do envelope. \\
+\msg{HEARTBEAT} & \msg{estado}, \msg{coordenador}. Fora do relógio lógico. \\
+\msg{ELECTION} / \msg{OK} & Sem campos extras. Iniciar eleição e responder como ID maior. \\
+\msg{COORDINATOR} & Sem campos extras: o vencedor é a \msg{origem}. Não libera envios. \\
+\msg{VIEW_INSTALL} & \msg{transicao}, \msg{lider}, \msg{membros}, \msg{historico}, \msg{relogio}. \\
+\msg{VIEW_READY} & \msg{transicao}: confirma a instalação. \\
+\msg{VIEW_RESUME} & \msg{transicao}: libera a operação após todos os READY. \\
+\msg{VIEW_PREPARE} & A definir em T05: transição e membros propostos. \\
+\msg{VIEW_STATE} & A definir em T05: histórico, pendências e relógio após o corte. \\
+\msg{JOIN} / \msg{SNAPSHOT} & A definir em T06: admissão e transferência de estado. \\
 \bottomrule
 \end{tabularx}
 
-\section{Decisões de contrato ainda abertas}
-Fechar o bootstrap da primeira visão, os tipos e nomes exatos dos campos,
-as respostas HTTP e a referência de transição usada nas mensagens de controle.
-Detalhar a identidade após reinício, o tratamento do mesmo UUID recebido por nós
-distintos, a implementação da pausa local e a reconciliação de pendências.
-Definir também como o navegador consulta, confirma e reenvia tentativas.
+A referência de transição (\msg{transicao}) é a época proposta.
 
-A revisão deve simular mensagens em trânsito e conferir a preservação do prefixo
-já entregue. O exemplo acima foi conferido com um modelo de dados em memória:
+\textbf{Respostas HTTP.} \msg{200}: processado, repetido (\msg{duplicado}),
+descartado por época antiga ou ignorado; em todos os casos, o retry termina.
+\msg{503}: o receptor ainda não pode processar (sem visão, aguardando
+\msg{VIEW_RESUME} ou época mais nova que a sua); o canal repete o mesmo pacote
+sem avançar, preservando o FIFO. \msg{400}: pacote malformado, registrado como
+defeito e não repetido. Só MSG e ACK passam pelo canal FIFO com retry e pela
+deduplicação por \msg{pacote_id}. O controle é enviado uma vez, de forma direta,
+e é idempotente: quem precisa de resposta o reenvia a cada ciclo de heartbeat.
+
+\textbf{Bootstrap.} Todos começam \emph{sincronizando}, sem visão. O nó de maior
+ID configurado propõe a visão $(1, \mathrm{ID})$ com todos os nós configurados
+quando recebeu heartbeat recente de cada um e nenhum tem visão. Ele envia
+\msg{VIEW_INSTALL}; cada nó instala, responde \msg{VIEW_READY} e segue pausado;
+com todos prontos, o coordenador retoma e envia \msg{VIEW_RESUME}, reenviando
+até ver todos ativos pelos heartbeats. Logo, o grupo inicial exige os três nós.
+Um nó que reinicia encontra pares com visão, não faz bootstrap e aguarda
+admissão por \msg{JOIN} (T06). Reiniciar todos começa um grupo novo e vazio.
+
+\textbf{Cliente.} O cliente envia \texttt{\{id, sala, autor, texto\}}. O nó envia,
+na conexão, \texttt{\{tipo: historico, no, mensagens\}}. A cada entrega,
+envia \msg{entregue} com \msg{posicao}, \msg{epoca}, \msg{relogio}, \msg{origem}
+e \msg{mensagem}; esse aviso é a confirmação. Respostas imediatas: \msg{aceita} (em andamento, não é confirmação),
+\msg{confirmada} (UUID já entregue) ou \msg{recusada} com \msg{motivo}
+(campos inválidos, UUID reutilizado com outro conteúdo ou nó fora do estado
+ativo). Tentativa pendente ou recusada é reenviada com o mesmo UUID.
+
+\section{Decisões ainda abertas e validação}
+Para T05 e T06: implementação da pausa local, formato de \msg{VIEW_PREPARE},
+\msg{VIEW_STATE}, \msg{JOIN} e \msg{SNAPSHOT}, reconciliação de pendências,
+encerramento dos canais para membros removidos e limpeza dos identificadores
+de pacotes processados, hoje guardados sem limite durante a execução.
+
+Validação da v1 (\msg{tests/}): uma simulação em memória intercala canais ao
+acaso, mantém FIFO em cada canal, repete pacotes e responde 503 a um nó ainda
+pausado. Em 200 sementes, os três nós entregaram a mesma sequência, sem perdas
+nem duplicatas. Defeitos injetados de propósito (entregar com ACKs parciais ou
+ordenar pelo relógio do receptor) fizeram a simulação falhar. Testes assíncronos
+cobrem Bully, suspeita, bootstrap e a exclusão de nós sincronizando.
+Um teste de integração sobe três processos reais em \msg{localhost}, envia 45
+mensagens concorrentes por três clientes WebSocket e derruba o líder; os
+sobreviventes elegeram o nó 2 e mantiveram os envios pausados. O Compose não foi
+executado neste ambiente. Esses testes não provam a correção geral.
+
+O exemplo da seção 3 foi conferido com um modelo de dados em memória:
 união ordenada, prefixos, sufixos a entregar e rejeição de prefixo incompatível.
-Isso não executou nós, transporte ou o protocolo e não prova sua segurança geral.
+Isso não executou o protocolo de reorganização, ainda não implementado.
 \section*{Referências iniciais}
 Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,
 fornecido durante o planejamento.
