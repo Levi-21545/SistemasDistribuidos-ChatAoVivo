@@ -22,8 +22,8 @@ A versão final deverá ter 4 a 6 páginas, com a solução realmente implementa
 as decisões efetivas e os testes executados. A extensão atual é provisória.
 Em 5/11 estão implementados transporte, ordenação, heartbeat, Bully e bootstrap
 (T02--T04). Em 6/11, duas correções de robustez foram feitas e a reorganização
-após uma queda (T05) foi implementada e validada no Compose. Reentrada (T06) e
-painel seguem pendentes.
+após uma queda (T05) foi implementada e validada no Compose. Em 11/11, foi
+implementada a reentrada (T06) com JOIN/SNAPSHOT. O painel segue pendente.
 
 \section{Objetivo e arquitetura proposta}
 Construir um chat cuja mesma sequência de mensagens seja entregue aos clientes
@@ -77,7 +77,8 @@ O líder administra o grupo e não numera as mensagens do chat. \\
 Recuperação & Corte síncrono em cada sobrevivente, reconciliação dos estados
 capturados e barreira INSTALL, READY de todos, RESUME. Adaptação didática de
 troca de visão, testada no cenário suportado; não é consenso geral. \\
-Reentrada & Snapshot antes de admitir o nó e permitir sua participação na eleição. \\
+Reentrada & JOIN, corte dos sobreviventes e snapshot com histórico e relógio;
+READY de todos antes do RESUME, incluindo o nó readmitido. \\
 \bottomrule
 \end{tabularx}
 
@@ -94,7 +95,7 @@ A troca de visão separa a pausa por suspeita, que só recusa novos envios, do
 corte definitivo, que acontece ao aceitar o \msg{VIEW_PREPARE}: no mesmo passo
 síncrono o nó pausa, captura histórico, pendências e relógio e descarta as filas
 de dados da visão antiga. Cada corte é uma fronteira local, não um instante global.
-O coordenador, que é sempre o maior ID vivo, junta as capturas: o histórico mais
+O coordenador da transição junta as capturas: o histórico mais
 longo vira base e as pendências que faltam entram pela chave original. Isso é
 seguro porque, com FIFO e ACK de todos, uma mensagem só é entregue quando nenhuma
 outra de chave menor pode chegar. Logo, nenhuma pendência nova tem chave menor que
@@ -214,9 +215,32 @@ sobreviventes. A queda ocorreu com o tráfego já entregue: mensagens em trânsi
 só foram exercitadas na simulação.
 \end{itemize}
 
+\textbf{Reentrada (T06, 11/11).} A suíte executada integralmente em Docker com
+Python 3.13 aprovou 397 testes, incluindo 36 casos simulados específicos de
+admissão e três casos HTTP/WebSocket com reinício dos nós 3, 1 e 2.
+Os testes verificam o histórico completo, preservação dos prefixos, relógio,
+UUIDs, mensagens em trânsito entre sobreviventes, clientes antes da retomada,
+perda e repetição dos controles, snapshots incompatíveis, encarnações antigas
+e nova queda após uma admissão concluída. A integração revelou uma eleição da
+época anterior que podia terminar após a nova visão retomar e pausá-la de novo;
+a eleição agora confere sua época após a espera, com teste de regressão.
+O roteiro \msg{sh scripts/validar_reentrada.sh} também passou para os três nós,
+com clientes em contêineres e nomes resolvidos pelo DNS do Compose: 45 mensagens
+concorrentes antes da queda, uma durante a ausência, readmissão com históricos
+completos iguais, reenvio confirmado sem duplicação, um novo envio pelo nó
+readmitido e mais 45 mensagens concorrentes. Cada cenário terminou com 92 eventos
+únicos; a readmissão levou cerca de 2--3 segundos na execução observada, sem
+constituir prazo garantido. O roteiro remove os contêineres, rede e volume
+temporário. Falhas durante tráfego na admissão permanecem cobertas pela simulação;
+o roteiro real derruba o nó após as entregas anteriores terminarem.
+
 \section{Limitações e pontos a consolidar}
 O bootstrap exige os três nós, e a retomada exige dois. Um nó reiniciado fica
-sincronizando, fora da visão, até a T06 (JOIN/SNAPSHOT). Ficam fora da garantia:
+sincronizando até receber o snapshot e a retomada da admissão (T06).
+O líder dos sobreviventes coordena essa transição; o maior ID do grupo ampliado
+assume a liderança na nova visão. A época continua identificando o proponente,
+podendo ser $(3,2)$ com líder 3 no retorno do antigo líder. UUIDs são reconstruídos
+do histórico transferido, e o relógio não diminui. Ficam fora da garantia:
 partições, falsas suspeitas (um nó lento que perde o prazo do heartbeat ou do
 \msg{ELECTION} é excluído) e falhas novas durante a transição, inclusive do
 coordenador, caso em que os nós permanecem pausados. Os identificadores de
@@ -234,6 +258,10 @@ reconciliação, testes e roteiro de validação no Compose) também foi escrita
 Claude Code a partir de um briefing do grupo, com revisão humana pendente.
 Este registro deve ser atualizado com os usos posteriores e a revisão humana
 realizada pelo grupo. Os integrantes precisam compreender e explicar a solução.
+Em 11/11, Codex auxiliou a análise dos commits e implementou a T06, seus testes,
+o estágio Docker de testes e o roteiro Compose de queda e retorno, além de
+corrigir uma eleição antiga que podia pausar uma visão já retomada.
+A revisão humana dessas alterações continua pendente.
 
 \section*{Referências iniciais}
 Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,

@@ -1,0 +1,13 @@
+# Uso automatizado: sh scripts/validar_reentrada.sh
+# O perfil evita subir o validador junto com os servidores.
+services:
+  testes:
+    build:
+      context: .
+      target: testes
+    profiles: [testes]
+    volumes:
+      - evidencias:/evidencias
+
+volumes:
+  evidencias:

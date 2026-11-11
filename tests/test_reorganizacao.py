@@ -392,21 +392,14 @@ def reiniciar(rede, i):
     rede.mortos.discard(i)
 
 
-def test_no_reiniciado_depois_da_reorganizacao_nao_e_admitido():
+def test_no_reiniciado_depois_da_reorganizacao_e_admitido():
     async def cenario():
         rede = grupo()
         rede.mortos.add(3)
         await ate(rede, retomados(rede, (2, 2), (1, 2)))
         reiniciar(rede, 3)
-        for _ in range(10):
-            await ate(rede, lambda: True)
-            rede.tempo += 0.1
-            for no in rede.nos.values():
-                no.ciclo()
-            rede.drenar()
-        assert rede.nos[3].estado == SINCRONIZANDO and rede.nos[3].visao is None
-        for i in (1, 2):
-            assert rede.nos[i].estado == ATIVO and rede.nos[i].visao.membros == {1, 2}
+        await ate(rede, retomados(rede, (3, 2), (1, 2, 3)))
+        assert all(n.visao.membros == {1, 2, 3} for n in rede.nos.values())
 
     asyncio.run(cenario())
 

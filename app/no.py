@@ -69,6 +69,7 @@ class No:
         self.ultimo_contato: dict[int, float] = {}
         self.estado_pares: dict[int, dict] = {}
         self._encarnacoes: dict[int, str] = {}  # última encarnação vista de cada par
+        self._encarnacoes_encerradas: set[tuple[int, str]] = set()
         self.suspeitos: set[int] = set()
         self._eleicao_ativa = False
         self._recebeu_ok = False
@@ -83,6 +84,9 @@ class No:
         self._estados: dict[int, dict] = {}  # VIEW_STATE recebidos, inclusive o próprio
         self._prontos: set[int] = set()
         self._instalacao: dict | None = None  # histórico e relógio do VIEW_INSTALL
+        self._entrantes: dict[int, str] = {}  # coordenador: ID -> encarnação admitida
+        self._pedido_join: dict | None = None  # nó sem visão: líder e época consultados
+        self._admissao: dict | None = None  # snapshot instalado, aguardando RESUME
         self.erro_transicao: str | None = None
         self._tarefas: set[asyncio.Task] = set()
 
@@ -98,6 +102,8 @@ class No:
             "VIEW_INSTALL": self._receber_view_install,
             "VIEW_READY": self._receber_view_ready,
             "VIEW_RESUME": self._receber_view_resume,
+            "JOIN": self._receber_join,
+            "SNAPSHOT": self._receber_snapshot,
         }
 
     # ------------------------------------------------------------------ envelope
@@ -170,6 +176,9 @@ class No:
         erro = erro_de_formato(pacote)
         if erro:
             return 400, {"erro": f"pacote malformado: {erro}"}
+        partes = pacote["pacote_id"].split("-")
+        if len(partes) == 3 and (pacote["origem"], partes[1]) in self._encarnacoes_encerradas:
+            return 200, {"descartado": "encarnação encerrada"}
         self._observar_encarnacao(pacote)
         dados = pacote["tipo"] in ("MSG", "ACK")
         if dados and pacote.get("pacote_id") in self._processados:
@@ -273,6 +282,8 @@ class No:
         self.estado = ATIVO
         self.fase = None
         self._corte = None
+        self._admissao = None
+        self._pedido_join = None
         self.erro_transicao = None
         sufixo, self._a_publicar = self._a_publicar, []
         for evento in sufixo:
@@ -298,7 +309,7 @@ class No:
     #   reorganização:  VIEW_PREPARE -> VIEW_STATE de todos -> reconciliação -> as mesmas
     # Bootstrap: o nó de maior ID configurado propõe a primeira visão quando
     # ouviu todos os nós configurados e nenhum deles tem visão. Um nó que
-    # reinicia depois encontra pares com visão e aguarda JOIN (T06).
+    # reinicia depois encontra pares com visão e solicita JOIN.
     # Reorganização: o coordenador pausado (líder vivo, ou eleito pelo Bully) propõe
     # a próxima época com os membros não suspeitos; é sempre o maior ID entre eles.
 
@@ -308,6 +319,8 @@ class No:
         elif self.visao is None:
             if self.id == max(self.cfg.nos) and self._grupo_sem_visao():
                 self._propor_visao_inicial()
+            else:
+                self._solicitar_entrada()
         else:
             self._propor_reorganizacao()
 
@@ -325,6 +338,7 @@ class No:
         proposta = Visao(epoca=(1, self.id), lider=self.id, membros=frozenset(self.cfg.nos))
         log.info("bootstrap: propondo a visão inicial %s", proposta.json())
         self._transicao, self._anterior = proposta, None
+        self._entrantes = {}
         self._prontos = {self.id}
         self._instalacao = {"historico": [], "relogio": 0}
         self.instalar(proposta, historico=[], relogio=0)
@@ -345,6 +359,7 @@ class No:
         proposta = Visao((anterior[0] + 1, self.id), self.id, frozenset(membros))
         log.warning("reorganização: propondo a visão %s para encerrar a época %s", proposta.json(), list(anterior))
         self._transicao, self._anterior = proposta, anterior
+        self._entrantes = {}
         self._estados, self._prontos, self._instalacao = {}, set(), None
         self.erro_transicao = None
         self._cortar(proposta.epoca, anterior, self.id, proposta.membros)
@@ -381,7 +396,10 @@ class No:
         if faltam_prontos:
             if reenviar:
                 for membro in faltam_prontos:
-                    self.rede.enviar_direto(membro, self._pacote_install(proposta))
+                    pacote = self._pacote_install(proposta)
+                    if membro in self._entrantes:
+                        pacote.update(tipo="SNAPSHOT", encarnacao=self._entrantes[membro])
+                    self.rede.enviar_direto(membro, pacote)
             return
         if self.fase == INSTALADA:
             self.retomar()
@@ -399,7 +417,9 @@ class No:
     def _reconciliar_se_completo(self, reenviar: bool) -> bool:
         """Com o VIEW_STATE de todos, reconcilia e instala localmente; True se instalou."""
         proposta = self._transicao
-        faltam = sorted(proposta.membros - set(self._estados))
+        # Um nó reiniciado não tem estado a reconciliar. Só os membros da visão
+        # encerrada contribuem; o entrante recebe o resultado pela barreira comum.
+        faltam = sorted(proposta.membros - set(self._entrantes) - set(self._estados))
         if faltam:
             if reenviar:
                 for membro in faltam:
@@ -465,10 +485,14 @@ class No:
             return "nó fora de uma visão em operação"
         if anterior != self.visao.epoca:
             return "a transição não encerra a visão atual deste nó"
-        if self.id not in membros or not membros <= self.visao.membros:
-            return "membros propostos fora da visão atual"
-        if origem != max(membros) or transicao[1] != origem or transicao <= anterior:
-            return "a proposta precisa vir do maior membro vivo, com época superior"
+        if self.id not in membros or not membros <= self.cfg.nos.keys():
+            return "membros propostos fora dos nós configurados"
+        ampliacao = membros > self.visao.membros
+        if not membros <= self.visao.membros and not ampliacao:
+            return "uma admissão não pode remover membros da visão atual"
+        coordenador = self.visao.lider if ampliacao else max(membros)
+        if origem != coordenador or transicao[1] != origem or transicao <= anterior:
+            return "a proposta precisa vir do coordenador da transição, com época superior"
         if 2 * len(membros) <= len(self.cfg.nos):
             return "proposta sem maioria dos nós configurados"
         return None
@@ -477,7 +501,7 @@ class No:
         proposta = self._transicao
         if (proposta is None or self._anterior is None or self.fase != CORTE
                 or tuple(pacote["transicao"]) != proposta.epoca or tuple(pacote["anterior"]) != self._anterior
-                or pacote["origem"] not in proposta.membros):
+                or pacote["origem"] not in proposta.membros or pacote["origem"] in self._entrantes):
             return 200, {"ignorado": "estado de transição desconhecida ou já reconciliada"}
         # O primeiro VIEW_STATE de cada membro vale; repetições trazem a mesma captura.
         self._estados.setdefault(pacote["origem"], {c: pacote[c] for c in ("historico", "pendentes", "relogio")})
@@ -486,7 +510,8 @@ class No:
 
     def _receber_view_install(self, pacote: dict) -> Resposta:
         proposta = Visao(tuple(pacote["transicao"]), pacote["lider"], frozenset(pacote["membros"]))
-        if self.id not in proposta.membros or pacote["origem"] != proposta.lider:
+        coordenador = self._corte["coordenador"] if self._corte else proposta.lider
+        if self.id not in proposta.membros or pacote["origem"] != coordenador:
             return 200, {"ignorado": "nó fora da visão proposta ou origem diferente do líder"}
         if pacote["anterior"] is None:
             motivo = self._instalar_bootstrap(proposta, pacote)
@@ -521,17 +546,94 @@ class No:
     def _receber_view_ready(self, pacote: dict) -> Resposta:
         proposta = self._transicao
         if (proposta is None or self._instalacao is None or tuple(pacote["transicao"]) != proposta.epoca
-                or pacote["origem"] not in proposta.membros):
+                or pacote["origem"] not in proposta.membros
+                or (pacote["origem"] in self._entrantes and not self._pacote_da_encarnacao(
+                    pacote, self._entrantes[pacote["origem"]]))):
             return 200, {"ignorado": "transição desconhecida"}
         self._prontos.add(pacote["origem"])
         self._avancar_transicao(reenviar=False)
         return 200, {"ok": True}
 
     def _receber_view_resume(self, pacote: dict) -> Resposta:
+        contexto = self._corte or self._admissao
+        coordenador = contexto["coordenador"] if contexto else (self.visao.lider if self.visao else None)
         if (self.visao is None or tuple(pacote["transicao"]) != self.visao.epoca or self.fase != INSTALADA
-                or pacote["origem"] != self.visao.lider):
+                or pacote["origem"] != coordenador):
             return 200, {"ignorado": "retomada desconhecida ou já aplicada"}
         self.retomar()
+        return 200, {"ok": True}
+
+    # ------------------------------------------------------------------ reentrada
+
+    def _solicitar_entrada(self) -> None:
+        """Sem visão, consulta um líder ativo observado por heartbeat recente."""
+        if self.fase is not None:
+            return
+        for par, estado in sorted(self.estado_pares.items()):
+            if (estado["estado"] != ATIVO or estado["coordenador"] != par
+                    or estado["epoca"] is None
+                    or self.agora() - self.ultimo_contato[par] > self.cfg.suspeita_timeout):
+                continue
+            self._pedido_join = {"coordenador": par, "anterior": tuple(estado["epoca"])}
+            self.rede.enviar_direto(par, self._pacote("JOIN", anterior=estado["epoca"],
+                                                      encarnacao=self.encarnacao))
+            return
+
+    def _receber_join(self, pacote: dict) -> Resposta:
+        """O líder atual conduz a ampliação; o maior ID será líder da nova visão."""
+        origem = pacote["origem"]
+        if (self.visao is None or self.estado != ATIVO or self.fase is not None
+                or self._transicao is not None or self.coordenador != self.id
+                or origem in self.visao.membros or pacote["epoca"] is not None
+                or tuple(pacote["anterior"]) != self.visao.epoca
+                or pacote["encarnacao"] != self._encarnacoes.get(origem)
+                or not self._pacote_da_encarnacao(pacote, pacote["encarnacao"])):
+            return 200, {"ignorado": "JOIN fora de uma visão estável ou de outra encarnação"}
+        membros = self.visao.membros | {origem}
+        if 2 * len(self.visao.membros) <= len(self.cfg.nos):
+            return 200, {"ignorado": "admissão exige maioria dos sobreviventes"}
+        anterior = self.visao.epoca
+        proposta = Visao((anterior[0] + 1, self.id), max(membros), membros)
+        self._transicao, self._anterior = proposta, anterior
+        self._entrantes = {origem: pacote["encarnacao"]}
+        self._estados, self._prontos, self._instalacao = {}, set(), None
+        log.info("reentrada do nó %s: propondo %s", origem, proposta.json())
+        self._cortar(proposta.epoca, anterior, self.id, membros)
+        self._estados[self.id] = self._corte["captura"]
+        self._avancar_transicao(reenviar=True)
+        return 200, {"ok": True}
+
+    @staticmethod
+    def _pacote_da_encarnacao(pacote: dict, encarnacao: str) -> bool:
+        partes = pacote["pacote_id"].split("-")
+        return len(partes) == 3 and partes[:2] == [str(pacote["origem"]), encarnacao]
+
+    def _receber_snapshot(self, pacote: dict) -> Resposta:
+        proposta = Visao(tuple(pacote["transicao"]), pacote["lider"], frozenset(pacote["membros"]))
+        contexto = {"coordenador": pacote["origem"], "anterior": tuple(pacote["anterior"])}
+        if (pacote["encarnacao"] != self.encarnacao or self._pedido_join != contexto
+                or self.id not in proposta.membros or pacote["origem"] not in proposta.membros
+                or not proposta.membros <= self.cfg.nos.keys()
+                or proposta.lider != max(proposta.membros) or proposta.epoca[1] != pacote["origem"]
+                or proposta.epoca <= contexto["anterior"]
+                or 2 * len(proposta.membros - {self.id}) <= len(self.cfg.nos)):
+            return 200, {"ignorado": "snapshot sem JOIN correspondente"}
+        if self.visao is not None:
+            if self._admissao != contexto or self.visao != proposta or self.fase != INSTALADA:
+                return 200, {"ignorado": "snapshot de outra transição ou já retomado"}
+        else:
+            historico = [Evento.de_json(e) for e in pacote["historico"]]
+            # Valida o estado completo antes de instalar: não se aceita UUID repetido,
+            # evento de época futura nem relógio abaixo do estado transferido.
+            if (len({e.uuid for e in historico}) != len(historico)
+                    or any(e.epoca > contexto["anterior"] or e.relogio > pacote["relogio"]
+                           for e in historico)):
+                return 200, {"ignorado": "snapshot com histórico ou relógio incompatível"}
+            erro = self.instalar(proposta, historico, pacote["relogio"])
+            if erro:
+                return 200, {"ignorado": erro}
+            self._admissao = contexto
+        self.rede.enviar_direto(pacote["origem"], self._pacote("VIEW_READY", transicao=list(proposta.epoca)))
         return 200, {"ok": True}
 
     # ------------------------------------------------------------------ heartbeat
@@ -570,6 +672,8 @@ class No:
         if len(partes) != 3 or partes[0] != str(origem):
             return
         anterior, self._encarnacoes[origem] = self._encarnacoes.get(origem), partes[1]
+        if anterior is not None and anterior != partes[1]:
+            self._encarnacoes_encerradas.add((origem, anterior))
         if anterior is not None and anterior != partes[1] and self._membro_em_operacao(origem):
             self._suspeitar(origem, motivo=f"reiniciou: encarnação {anterior} -> {partes[1]}")
 
@@ -607,8 +711,9 @@ class No:
         if self._eleicao_ativa or not self._participa_da_eleicao():
             return
         self._eleicao_ativa = True
+        epoca = self.visao.epoca
         try:
-            while self._participa_da_eleicao():
+            while self._participa_da_eleicao() and self.visao.epoca == epoca:
                 self._recebeu_ok = False
                 self._anuncio.clear()
                 maiores = [m for m in self._outros_membros() if m > self.id and m not in self.suspeitos]
@@ -617,8 +722,8 @@ class No:
                     self.rede.enviar_direto(destino, self._pacote("ELECTION"))
                 if maiores:
                     await asyncio.sleep(self.cfg.eleicao_timeout)
-                if not self._participa_da_eleicao():
-                    return  # uma transição começou durante a espera
+                if not self._participa_da_eleicao() or self.visao.epoca != epoca:
+                    return  # a transição pode até já ter retomado durante a espera
                 if not self._recebeu_ok:
                     # Bully: os maiores que não responderam são tratados como falhos.
                     if maiores:
@@ -700,7 +805,7 @@ class No:
         if self._transicao is not None:
             proposta = self._transicao
             if self.fase == CORTE:
-                etapa, aguardando = "coleta", proposta.membros - set(self._estados)
+                etapa, aguardando = "coleta", proposta.membros - set(self._entrantes) - set(self._estados)
             elif proposta.membros - self._prontos:
                 etapa, aguardando = "instalacao", proposta.membros - self._prontos
             else:
@@ -762,6 +867,10 @@ _CAMPOS = {
                      "membros": _lista(_inteiro), "historico": _lista(_evento_json), "relogio": _inteiro},
     "VIEW_READY": {"transicao": _epoca},
     "VIEW_RESUME": {"transicao": _epoca},
+    "JOIN": {"anterior": _epoca, "encarnacao": lambda v: isinstance(v, str) and bool(v)},
+    "SNAPSHOT": {"transicao": _epoca, "anterior": _epoca, "lider": _inteiro,
+                 "membros": _lista(_inteiro), "historico": _lista(_evento_json), "relogio": _inteiro,
+                 "encarnacao": lambda v: isinstance(v, str) and bool(v)},
 }
 
 

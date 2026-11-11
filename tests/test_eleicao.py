@@ -180,3 +180,20 @@ def test_bootstrap_nao_ocorre_se_algum_par_ja_tem_visao():
         assert rede.nos[3].visao is None and rede.nos[3].estado == SINCRONIZANDO  # aguarda JOIN (T06)
 
     asyncio.run(cenario())
+
+
+def test_eleicao_antiga_nao_pausa_visao_que_ja_retomou():
+    async def cenario():
+        rede = criar(Relogio())
+        no = rede.nos[1]
+        rede.retidos.add("ELECTION")  # mantém a eleição esperando o timeout de OK
+        tarefa = asyncio.create_task(no.iniciar_eleicao())
+        await asyncio.sleep(0)  # eleição da época (1,3) entrou na espera
+        assert no._eleicao_ativa
+        no.instalar(Visao((2, 2), 2, frozenset({1, 2})), [], 0)
+        no.retomar()  # corte, instalação e retomada terminaram antes do timeout
+        await tarefa
+        assert no.estado == ATIVO and no.coordenador == 2
+        assert no.suspeitos == set() and no._transicao is None
+
+    asyncio.run(cenario())

@@ -55,8 +55,22 @@ INSTALL = controle("VIEW_INSTALL", transicao=EPOCA, anterior=None, lider=3, memb
 
 PREPARE = controle("VIEW_PREPARE", origem=3, transicao=[2, 3], anterior=EPOCA, membros=[1, 3])
 STATE = controle("VIEW_STATE", transicao=[2, 3], anterior=EPOCA, historico=[], pendentes=[], relogio=0)
+JOIN = controle("JOIN", epoca=None, anterior=EPOCA, encarnacao="teste")
+SNAPSHOT = INSTALL | {"tipo": "SNAPSHOT", "anterior": EPOCA, "encarnacao": "teste"}
 
 MALFORMADOS = {
+    "JOIN sem anterior": sem(JOIN, "anterior"),
+    "JOIN anterior null": JOIN | {"anterior": None},
+    "JOIN sem encarnacao": sem(JOIN, "encarnacao"),
+    "JOIN encarnacao vazia": JOIN | {"encarnacao": ""},
+    "SNAPSHOT sem encarnacao": sem(SNAPSHOT, "encarnacao"),
+    "SNAPSHOT encarnacao numero": SNAPSHOT | {"encarnacao": 3},
+    "SNAPSHOT sem anterior": sem(SNAPSHOT, "anterior"),
+    "SNAPSHOT anterior null": SNAPSHOT | {"anterior": None},
+    "SNAPSHOT membros booleanos": SNAPSHOT | {"membros": [True, 2, 3]},
+    "SNAPSHOT historico malformado": SNAPSHOT | {"historico": [{}]},
+    "SNAPSHOT relogio booleano": SNAPSHOT | {"relogio": True},
+    "SNAPSHOT sem transicao": sem(SNAPSHOT, "transicao"),
     "MSG sem pacote_id": sem(msg(), "pacote_id"),
     "ACK sem pacote_id": sem(ack(), "pacote_id"),
     "pacote_id número": msg(pacote_id=7),

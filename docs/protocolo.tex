@@ -10,17 +10,17 @@
 \setlength{\parskip}{5pt}
 \setlist{nosep,leftmargin=*}
 \newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
-\title{Chat com ordenação\\\large Documento de protocolo -- v2}
+\title{Chat com ordenação\\\large Documento de protocolo -- v3}
 \author{Levi \and Henri \and André \and Gabriel}
-\date{6 de novembro de 2026}
+\date{11 de novembro de 2026}
 \begin{document}
 \maketitle
 \vspace{-1.4em}
 
-\textbf{Estado.} A v2 fecha o contrato da operação normal, do heartbeat, do
+\textbf{Estado.} A v3 fecha o contrato da operação normal, do heartbeat, do
 Bully, do bootstrap e da reorganização após uma queda (seções 2 a 4), implementados
-em \msg{app/} e testados (seção 5). A reentrada de um nó reiniciado continua como
-proposta, para a T06. O texto ainda depende da revisão do grupo.
+em \msg{app/} e testados (seção 5), e implementa a reentrada por JOIN/SNAPSHOT
+(T06). O texto ainda depende da revisão do grupo.
 Arquitetura e justificativas ficam em \msg{docs/relatorio.tex}.
 
 \section{Escopo e transporte}
@@ -228,14 +228,44 @@ demais membros. Seu cliente poderá repetir a tentativa com o mesmo UUID.
 Este exemplo não cobre falhas adicionais durante a reorganização. Ele é um teste
 automático (\msg{tests/test_reorganizacao.py}), montado com essa sequência FIFO.
 
-\subsection*{Reentrada: proposta para a T06}
-O nó retorna sincronizando e envia \msg{JOIN}.
-Sua admissão usa a mesma pausa. Recebe \msg{SNAPSHOT} com histórico, UUIDs
-entregues, visão e relógio antes de entrar no grupo ativo.
-Depois pode participar de uma eleição Bully, inclusive se tiver o maior ID.
+\subsection*{Reentrada (T06)}
+O nó retorna sincronizando, sem visão, e observa heartbeats recentes. Ao encontrar
+um líder ativo, envia \msg{JOIN}, com a época observada em \msg{anterior} e sua
+\msg{encarnacao}; a época do envelope é \msg{null}. Repete a solicitação a cada
+ciclo enquanto não recebe uma instalação. O líder só aceita um nó configurado
+fora da visão, com a mesma encarnação do \msg{pacote_id}, se a visão está ativa,
+tem maioria e nenhuma transição está em curso. Um reinício rápido de membro
+atual primeiro exige a remoção pela T05; só depois ocorre a admissão.
+
+O líder atual propõe a época $(c+1,\mathrm{ID\ do\ proponente})$, adicionando o
+entrante sem remover sobreviventes. O líder da nova visão é o maior ID do grupo
+ampliado. Assim, o retorno do nó 3 à visão $(2,2)$ produz a visão $(3,2)$ com
+líder 3: o autor da proposta continua sendo o nó 2. A instalação e a retomada
+dessa transição vêm do proponente, mesmo quando ele deixa de ser líder.
+
+Os sobreviventes aceitam essa ampliação somente do líder da visão encerrada.
+Fazem o mesmo corte e enviam \msg{VIEW_STATE}; o entrante não contribui estado
+vazio à reconciliação. O proponente reconcilia as capturas e envia
+\msg{VIEW_INSTALL} aos sobreviventes e \msg{SNAPSHOT} ao entrante. O snapshot
+leva a mesma visão, histórico de eventos completos e relógio, além da encarnação
+destinatária. Os UUIDs entregues são reconstruídos do histórico, sem uma segunda
+lista que possa divergir dele. O entrante exige um JOIN correspondente ao
+proponente e à época anterior, sua própria encarnação, membros configurados,
+maioria prévia, novo líder de maior ID, época superior, UUIDs únicos e relógio
+não inferior ao dos eventos. Snapshots alheios ou atrasados são ignorados.
+
+O entrante instala pausado, sem publicar o histórico, responder à eleição ou
+aceitar novos envios. Responde \msg{VIEW_READY}; o proponente exige READY dos
+sobreviventes e do entrante, conferindo a encarnação deste. Só então retoma e
+envia \msg{VIEW_RESUME}. O histórico passa a ser publicado uma vez e a deduplicação
+por UUID fica disponível antes de novos envios. Se um RESUME se perder, dados
+novos esperam com 503 até sua retransmissão. Cada controle é idempotente e
+reenviado pela etapa que o aguarda. Encarnações já substituídas são descartadas,
+evitando que pacotes do processo anterior causem nova suspeita após a admissão.
+Como na T05, uma nova falha durante essa transição fica fora da garantia.
 
 
-\section{Contrato v2}
+\section{Contrato v3}
 \textbf{Rotas.} Entre nós: \msg{POST /interno/pacote}, corpo JSON com o
 envelope. Clientes: WebSocket em \msg{/ws}. Observação: \msg{GET /estado} e
 \msg{GET /historico}. Época é a lista \msg{[contador, coordenador]}, ou
@@ -256,7 +286,8 @@ Tipo & Campos além do envelope e função \\
 \msg{VIEW_INSTALL} & \msg{transicao}, \msg{anterior}, \msg{lider}, \msg{membros}, \msg{historico} e \msg{relogio}; no bootstrap, \msg{anterior} é \msg{null}. \\
 \msg{VIEW_READY} & \msg{transicao}: confirma a instalação. \\
 \msg{VIEW_RESUME} & \msg{transicao}: libera a operação após todos os READY. \\
-\msg{JOIN} / \msg{SNAPSHOT} & A definir em T06: admissão e transferência de estado. \\
+\msg{JOIN} & \msg{anterior}, \msg{encarnacao}; envelope com época \msg{null}. Solicita admissão. \\
+\msg{SNAPSHOT} & Campos de \msg{VIEW_INSTALL}, mais \msg{encarnacao} do destinatário; \msg{anterior} não nulo. Instala o estado no entrante, ainda pausado. \\
 \bottomrule
 \end{tabularx}
 
@@ -298,8 +329,7 @@ e \msg{mensagem}; esse aviso é a confirmação. Respostas imediatas: \msg{aceit
 ativo). Tentativa pendente ou recusada é reenviada com o mesmo UUID.
 
 \section{Decisões ainda abertas e validação}
-Para a T06: formato de \msg{JOIN} e \msg{SNAPSHOT} e a admissão de um nó
-reiniciado. Ainda sem tratamento: limpeza dos identificadores de pacotes
+Ainda sem tratamento: limpeza dos identificadores de pacotes
 processados (guardados sem limite durante a execução), falhas novas durante uma
 transição (inclusive do coordenador) e partições.
 
@@ -338,6 +368,17 @@ cenário, do nó 1. A nova visão ficou ativa de 4 a 5 segundos após o \msg{kil
 com históricos preservados e uma mensagem nova entregue aos dois sobreviventes.
 Nesses dois cenários, o tráfego já tinha terminado quando o nó caiu: a recuperação
 de mensagens em trânsito foi exercitada só na simulação.
+Validação da T06 (11/11): 397 testes aprovados em Docker com Python 3.13.
+Os 36 casos de \msg{tests/test_reentrada.py} cobrem retorno dos três nós em
+seis sementes, mensagens em trânsito entre sobreviventes, relógio, UUIDs,
+clientes e barreira, perda/repetição dos controles, snapshots incompatíveis,
+encarnação antiga e reinício rápido. Três testes de integração HTTP/WebSocket
+derrubam e readmitem os nós 3, 1 e 2, conferindo reenvio confirmado sem duplicação.
+\msg{sh scripts/validar_reentrada.sh} passou para os três nós usando DNS do
+Compose, com históricos completos iguais, mensagens durante a ausência e depois
+do retorno, e 45 envios concorrentes antes e depois de cada queda. A readmissão
+levou cerca de 2--3 segundos na execução observada, sem prazo garantido.
+
 \section*{Referências iniciais}
 Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,
 fornecido durante o planejamento.

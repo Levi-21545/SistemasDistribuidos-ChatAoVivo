@@ -4,9 +4,9 @@ Trabalho final de Sistemas Distribuídos de 2026, por Levi, Henri, André e Gabr
 
 Implementados (aguardando revisão do grupo): transporte FIFO com retry,
 multicast ordenado por Lamport, heartbeat, eleição Bully, bootstrap da visão
-inicial e reorganização após a queda de um nó (T02–T05), validados no Compose
-em 06/11. Pendentes: reentrada de um nó reiniciado, painel e ensaio da avaliação
-(T06–T10).
+inicial, reorganização após a queda de um nó e reentrada por JOIN/SNAPSHOT
+(T02–T06). A T06 tem testes em Docker e roteiro Compose de queda e retorno.
+Pendentes: concluir a validação do cliente, painel e ensaio da avaliação (T07–T10).
 
 ## Por onde começar
 
@@ -16,6 +16,8 @@ em 06/11. Pendentes: reentrada de um nó reiniciado, painel e ensaio da avaliaç
 - [tests/](tests/): testes unitários, simulação de rede e integração.
 - [scripts/validar_compose.py](scripts/validar_compose.py): validação da
   queda do líder e de membro comum no Docker Compose.
+- [scripts/validar_reentrada.sh](scripts/validar_reentrada.sh): validação de queda
+  e retorno dos três nós, com todos os clientes e testes em contêineres.
 - [Documento de protocolo em TeX](docs/protocolo.tex): formatos de mensagens,
   fluxos de comunicação, confirmação e reorganização após queda.
 - [Relatório em TeX](docs/relatorio.tex): arquitetura, decisões, algoritmos,
@@ -71,9 +73,28 @@ chat, juntam o que cada um sabia e instalam uma nova visão só com os dois que
 sobraram. Se quem caiu foi o líder (nó 3), elegem antes um novo líder (nó 2).
 Em seguida, o chat volta a aceitar mensagens, com o mesmo histórico nos dois
 nós. Com só um nó vivo, o chat fica pausado. Um nó que volta depois de cair
-ainda não é readmitido; isso é a próxima tarefa (T06).
+solicita entrada ao líder dos sobreviventes. O grupo pausa brevemente, reconcilia
+as mensagens em trânsito e transfere o histórico e o relógio ao nó reiniciado.
+Só retoma depois de todos confirmarem a instalação. Os UUIDs entregues são
+reconstruídos do histórico, permitindo reenvio sem duplicação. O maior ID volta
+a ser líder; a época identifica quem propôs a transição, que pode ser outro nó.
 
 ### 1. Preparar o ambiente (só na primeira vez)
+
+**Sem instalar Python na máquina**, use Docker para executar toda a suíte:
+
+```sh
+docker build --target testes -t chat-aovivo-test .
+docker run --rm chat-aovivo-test
+```
+
+Isso inclui os testes HTTP/WebSocket com três processos reais dentro do
+contêiner. Para testar somente a reentrada:
+`docker run --rm chat-aovivo-test python -m pytest tests/test_reentrada.py -q`.
+Refaça o build depois de alterar código ou testes. A imagem normal do Compose
+continua sendo o estágio `runtime`, sem as dependências de teste.
+
+Como alternativa, para execução local:
 
 Precisa de **Python 3.13** ou mais novo. Docker não é necessário.
 Na pasta do projeto:
@@ -91,8 +112,9 @@ No Linux/macOS, troque `.\.venv\Scripts\` por `.venv/bin/` em todos os comandos.
 .\.venv\Scripts\python -m pytest
 ```
 
-Leva cerca de 20 segundos (10 segundos num Mac em 06/11). O resultado
-esperado é `345 passed` (verificado em 06/11, Python 3.13, macOS). Os testes:
+Resultado atual: **397 testes aprovados** em 11/11, com Python 3.13 em Docker
+(cerca de 31 segundos). A T06 acrescenta testes de admissão, barreiras, controles
+atrasados e integração com reinício. Os testes:
 
 - simulam a rede em 200 cenários aleatórios, com pacotes repetidos e fora de
   ordem entre canais, e conferem que os três nós entregam a mesma sequência;
@@ -162,10 +184,10 @@ Para derrubar um membro comum, feche o terminal 1 em vez do 3: o líder 3
 continua e a nova época é `(2, 3)`. Esse roteiro no navegador não foi refeito
 depois da T05; o mesmo comportamento foi verificado no Compose (abaixo).
 
-Para recomeçar, feche todos os nós (`Ctrl+C`) e suba os três de novo.
-Religar só o nó que caiu ainda não funciona: ele volta com outra encarnação,
-os outros o tratam como falho e ele fica sincronizando, fora do grupo, até a
-reentrada (T06).
+Religue somente o nó que caiu, usando o mesmo comando do terminal: ele volta com
+outra encarnação, sincroniza e é readmitido automaticamente. Aguarde o fim da
+transição antes de provocar outra queda. Reiniciar os três nós começa um grupo
+novo e vazio, porque o estado é mantido em memória.
 
 ### Endereços úteis
 
@@ -186,6 +208,10 @@ docker compose up --build
 O chat fica em <http://localhost:8001>, <http://localhost:8002> e
 <http://localhost:8003>. Para derrubar o líder: `docker compose kill no3`.
 Para encerrar e remover os contêineres: `docker compose down`.
+Para readmitir o nó derrubado: `docker compose start no3`.
+Na queda do líder, os sobreviventes passam a `(2, 2)`; no retorno do nó 3,
+os três passam a `(3, 2)`, com líder 3. O segundo número identifica o autor
+da proposta (nó 2), e não necessariamente o líder da visão instalada.
 
 Verificado em 06/11 (OrbStack, Docker 29.8.2), com `docker compose build
 --no-cache`, `docker compose up -d`, `docker compose kill no3` e
@@ -226,6 +252,27 @@ da revisão da T05 (OrbStack, Docker 29.8.2):
 A queda ocorreu com o tráfego já entregue. A recuperação de mensagens em
 trânsito no momento da queda foi testada só na simulação (`tests/`).
 
+**Validação da reentrada (T06), sem Python no host.** Com as portas 8001–8003
+livres, execute no macOS/Linux (ou em um shell compatível):
+
+```sh
+sh scripts/validar_reentrada.sh
+```
+
+Para testar só o líder: `sh scripts/validar_reentrada.sh 3`.
+O roteiro usa o projeto Compose separado `chat-t06`, constrói as imagens e,
+para cada nó, envia 45 mensagens concorrentes, executa `kill`, verifica a
+retomada dos sobreviventes e envia durante a ausência. Depois executa `start`,
+compara os históricos completos dos três nós, reenvia o UUID já confirmado ao
+nó reiniciado e testa um novo envio dele e mais 45 mensagens concorrentes.
+Os clientes rodam no serviço `testes` de [compose.testes.yaml](compose.testes.yaml).
+O roteiro remove seus contêineres, rede e volume temporário ao terminar.
+Verificado em 11/11 com Docker/OrbStack: os três cenários passaram; a readmissão
+levou cerca de 2–3 segundos na execução observada, com 92 eventos únicos ao final
+de cada cenário. Esse tempo é uma observação, não um prazo garantido.
+A queda nesse roteiro ocorre após a entrega; a admissão com mensagens em
+trânsito entre sobreviventes também é coberta em `tests/test_reentrada.py`.
+
 ### Ajustes opcionais
 
 Os tempos podem ser mudados por variáveis de ambiente, em segundos:
@@ -236,7 +283,7 @@ e `COORDENADOR_TIMEOUT` (3).
 
 O roteiro final deve permitir subir três nós, abrir clientes em nós diferentes,
 observar a ordenação, derrubar o líder e conferir a recuperação. Hoje isso está
-coberto pelo teste manual acima e por `scripts/validar_compose.py`. Faltam a
-readmissão do nó que caiu (T06), o painel e o ensaio cronometrado.
+coberto pelo teste manual acima, por `scripts/validar_compose.py` e pelo roteiro
+Docker de reentrada. Faltam a validação final do cliente, o painel e o ensaio cronometrado.
 
 O relatório final será escrito em TeX e deverá declarar o uso de IA.

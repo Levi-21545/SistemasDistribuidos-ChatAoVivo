@@ -28,6 +28,7 @@ from websockets.asyncio.client import connect
 
 RAIZ = Path(__file__).resolve().parent.parent
 PORTAS = {1: 8001, 2: 8002, 3: 8003}
+URLS = {i: f"http://127.0.0.1:{p}" for i, p in PORTAS.items()}
 POR_CLIENTE = 15
 CENARIOS = {
     "lider": {"cai": 3, "visao": {"epoca": [2, 2], "lider": 2, "membros": [1, 2]}},
@@ -40,11 +41,11 @@ def compose(*args: str) -> None:
 
 
 def estado(i: int) -> dict:
-    return httpx.get(f"http://127.0.0.1:{PORTAS[i]}/estado", timeout=2).json()
+    return httpx.get(URLS[i] + "/estado", timeout=2).json()
 
 
 def historico(i: int) -> list[str]:
-    return [e["mensagem"]["id"] for e in httpx.get(f"http://127.0.0.1:{PORTAS[i]}/historico", timeout=2).json()]
+    return [e["mensagem"]["id"] for e in httpx.get(URLS[i] + "/historico", timeout=2).json()]
 
 
 def esperar(descricao: str, condicao, limite: float = 30.0) -> float:
@@ -78,7 +79,7 @@ async def entregas(ws, quantidade: int, limite: float = 30.0) -> list[str]:
 async def conectar(nos) -> dict:
     conexoes = {}
     for i in nos:
-        conexoes[i] = await connect(f"ws://127.0.0.1:{PORTAS[i]}/ws")
+        conexoes[i] = await connect(URLS[i].replace("http://", "ws://") + "/ws")
         assert json.loads(await conexoes[i].recv())["tipo"] == "historico"
     return conexoes
 
