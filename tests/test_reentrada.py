@@ -193,7 +193,7 @@ def test_snapshot_incompativel_nao_instala_nem_publica(defeito):
         elif defeito == "lider":
             pacote["lider"] = 2
         elif defeito == "membros":
-            pacote["membros"] = [2, 3]
+            pacote["membros"] = [2, 3, 4]  # nó fora da configuração
         elif defeito == "epoca":
             pacote["transicao"] = pacote["anterior"]
         elif defeito == "uuid":
@@ -203,5 +203,63 @@ def test_snapshot_incompativel_nao_instala_nem_publica(defeito):
         assert "ignorado" in no.receber_pacote(pacote)[1]
         assert no.visao is None and no.estado == SINCRONIZANDO
         assert no.historico == [] and no._a_publicar == [] and no.relogio.valor == 0
+
+    asyncio.run(cenario())
+
+
+QUEDAS_DUPLAS = {
+    "membros 1 e 2": ((1, 2), (2, 1)),
+    "membro 1 e líder 3": ((1, 3), (3, 1)),
+    "líder 3 e membro 2": ((3, 2), (2, 3)),
+    "1 e 2 ao mesmo tempo": ((1, 2), (1, 2)),
+}
+
+
+@pytest.mark.parametrize("quedas,retornos", QUEDAS_DUPLAS.values(), ids=QUEDAS_DUPLAS.keys())
+def test_duas_quedas_pausam_e_os_retornos_recuperam_o_grupo(quedas, retornos):
+    """Relato do grupo: depois de mais de uma queda, o chat nunca voltava.
+
+    Um sobrevivente sozinho fica pausado (sem maioria). Quando um nó caído volta,
+    os dois formam maioria e o grupo retoma a partir do estado do sobrevivente, que
+    conhece toda mensagem confirmada: cada uma exigiu o ACK dele.
+    """
+    async def cenario():
+        rede = grupo()
+        for no in rede.nos.values():
+            no.ciclo()  # registra as encarnações, como no bootstrap real
+        rede.drenar()
+        enviar_concorrentes(rede, 6, 0)
+        rede.drenar()
+        primeiro, segundo = quedas
+        simultaneas = quedas == retornos
+        rede.mortos.add(primeiro)
+        if simultaneas:
+            rede.mortos.add(segundo)
+        else:
+            vivos = set(rede.nos) - {primeiro}
+            await ate(rede, lambda: all(rede.nos[i].estado == ATIVO and rede.nos[i].visao.membros == vivos
+                                        for i in vivos))
+            rede.mortos.add(segundo)  # logo após a retomada: a transição anterior pode seguir aberta
+        sozinho = (set(rede.nos) - {primeiro, segundo}).pop()
+        confirmadas = ids_entregues(rede.nos[sozinho])
+        await ate(rede, lambda: rede.nos[sozinho].erro_transicao is not None)
+        assert "sem maioria" in rede.nos[sozinho].erro_transicao
+        assert rede.nos[sozinho].aceitar_do_cliente(nova("sozinho"))["tipo"] == "recusada"
+
+        for k, volta in enumerate(retornos, start=1):
+            reiniciar(rede, volta)
+            membros = {sozinho, *retornos[:k]}
+            await ate(rede, lambda: all(rede.nos[i].estado == ATIVO and rede.nos[i].fase is None
+                                        and rede.nos[i].visao.membros == membros for i in membros))
+            referencia = ids_entregues(rede.nos[sozinho])
+            assert referencia[:len(confirmadas)] == confirmadas  # nada confirmado se perdeu
+            assert len(set(referencia)) == len(referencia)
+            for i in membros:
+                assert ids_entregues(rede.nos[i]) == referencia
+            m = nova(f"depois do retorno do nó {volta}")
+            assert rede.nos[volta].aceitar_do_cliente(m)["tipo"] == "aceita"
+            rede.drenar()
+            assert all(ids_entregues(rede.nos[i])[-1] == m["id"] for i in membros)
+        assert all(n.visao.lider == 3 for n in rede.nos.values())
 
     asyncio.run(cenario())

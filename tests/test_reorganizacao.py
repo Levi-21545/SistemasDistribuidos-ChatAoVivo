@@ -278,7 +278,7 @@ def test_eleicao_sozinha_nao_retoma():
         await ate(rede, lambda: rede.nos[1].coordenador == 2 and rede.nos[2].coordenador == 2)
         for _ in range(5):
             await ate(rede, lambda: True)
-            rede.tempo += 0.5
+            rede.tempo += 0.3  # abaixo do timeout de 0,5 s: sem suspeita falsa do nó vivo
             for i in (1, 2):
                 rede.nos[i].ciclo()
             rede.drenar()
@@ -307,7 +307,7 @@ def test_historicos_incompativeis_mantem_pausa_com_erro():
         await ate(rede, lambda: rede.nos[2].erro_transicao is not None)
         for _ in range(3):
             await ate(rede, lambda: True)
-            rede.tempo += 0.5
+            rede.tempo += 0.3  # abaixo do timeout de 0,5 s: sem suspeita falsa do nó vivo
             for i in (1, 2):
                 rede.nos[i].ciclo()
             rede.drenar()
