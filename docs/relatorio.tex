@@ -116,7 +116,7 @@ suportado (seção 5), isso se manteve; não é uma prova geral.
 Durante suspeita, eleição e troca de visão, a aplicação fica pausada. No Compose,
 essa janela foi de 4 a 5 segundos entre o \msg{kill} e a nova visão ativa, com os
 tempos padrão (suspeita após 3 s). Com um único sobrevivente, novas mensagens
-ficam indisponíveis por tempo indeterminado. A opção prioriza preservar o estado
+ficam indisponíveis até um nó caído voltar e restabelecer a maioria. A opção prioriza preservar o estado
 conhecido, isto é, consistência sobre disponibilidade dentro do cenário suportado.
 
 A regra de dois participantes não prova exclusividade de liderança ou consistência
@@ -234,6 +234,16 @@ constituir prazo garantido. O roteiro remove os contêineres, rede e volume
 temporário. Falhas durante tráfego na admissão permanecem cobertas pela simulação;
 o roteiro real derruba o nó após as entregas anteriores terminarem.
 
+\textbf{Quedas múltiplas (16/11).} O grupo relatou que, depois de mais de uma
+queda, o chat nunca voltava. Com processos reais, a sequência \emph{cai o nó 1,
+cai o nó 2, volta o nó 2} reproduziu o problema: o nó 3 sozinho ficava pausado (o
+correto) e não admitia o nó que voltava (o defeito). A correção permite o JOIN a
+um líder pausado sem maioria, encerra a etapa de retomada que esperava um membro
+já caído e refaz a proposta quando um membro cai durante a coleta. Quatro
+regressões falharam antes e passaram depois, e a suíte aprovou 401 testes. No
+Compose, após \msg{kill} dos nós 1 e 2, os \msg{start} do nó 2 e do nó 1
+restabeleceram $\{2,3\}$ e depois $\{1,2,3\}$, com históricos iguais.
+
 \section{Limitações e pontos a consolidar}
 O bootstrap exige os três nós, e a retomada exige dois. Um nó reiniciado fica
 sincronizando até receber o snapshot e a retomada da admissão (T06).
@@ -242,8 +252,8 @@ assume a liderança na nova visão. A época continua identificando o proponente
 podendo ser $(3,2)$ com líder 3 no retorno do antigo líder. UUIDs são reconstruídos
 do histórico transferido, e o relógio não diminui. Ficam fora da garantia:
 partições, falsas suspeitas (um nó lento que perde o prazo do heartbeat ou do
-\msg{ELECTION} é excluído) e falhas novas durante a transição, inclusive do
-coordenador, caso em que os nós permanecem pausados. Os identificadores de
+\msg{ELECTION} é excluído) e falhas novas depois da coleta de uma transição,
+inclusive do coordenador, caso em que os nós permanecem pausados. Os identificadores de
 pacotes processados crescem sem limite durante a execução, e reiniciar todos os
 nós perde o histórico.
 

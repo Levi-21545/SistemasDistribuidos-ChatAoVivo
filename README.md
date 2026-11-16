@@ -72,7 +72,8 @@ diferentes. Se um nó cair, os outros percebem em cerca de 3 segundos, pausam o
 chat, juntam o que cada um sabia e instalam uma nova visão só com os dois que
 sobraram. Se quem caiu foi o líder (nó 3), elegem antes um novo líder (nó 2).
 Em seguida, o chat volta a aceitar mensagens, com o mesmo histórico nos dois
-nós. Com só um nó vivo, o chat fica pausado. Um nó que volta depois de cair
+nós. Com só um nó vivo, o chat fica pausado até um dos que caíram voltar: os
+dois formam maioria e retomam com o histórico do sobrevivente. Um nó que volta depois de cair
 solicita entrada ao líder dos sobreviventes. O grupo pausa brevemente, reconcilia
 as mensagens em trânsito e transfere o histórico e o relógio ao nó reiniciado.
 Só retoma depois de todos confirmarem a instalação. Os UUIDs entregues são
@@ -112,9 +113,8 @@ No Linux/macOS, troque `.\.venv\Scripts\` por `.venv/bin/` em todos os comandos.
 .\.venv\Scripts\python -m pytest
 ```
 
-Resultado atual: **397 testes aprovados** em 11/11, com Python 3.13 em Docker
-(cerca de 31 segundos). A T06 acrescenta testes de admissão, barreiras, controles
-atrasados e integração com reinício. Os testes:
+Resultado atual: **401 testes aprovados** em 16/11, com Python 3.13 local (cerca de 31 segundos);
+A T06 acrescenta testes de admissão, barreiras, controles atrasados e integração com reinício. Os testes:
 
 - simulam a rede em 200 cenários aleatórios, com pacotes repetidos e fora de
   ordem entre canais, e conferem que os três nós entregam a mesma sequência;

@@ -53,7 +53,7 @@ class Evento:
     @classmethod
     def de_json(cls, dados: dict) -> "Evento":
         mensagem, erro = validar_mensagem(dados["mensagem"])
-        if erro:
+        if mensagem is None:
             raise ValueError(erro)
         return cls(tuple(dados["epoca"]), int(dados["relogio"]), int(dados["origem"]), mensagem)
 

@@ -124,8 +124,11 @@ Suspeitas valem até a próxima instalação de visão.
 
 \section{Reorganização após uma queda (T05)}
 \textbf{Hipóteses.} Grupo inicial de três nós; uma queda por vez; sobreviventes
-conectados entre si; nenhuma nova falha durante a transição. Só há retomada com
-pelo menos dois dos três nós configurados. Fora disso, os nós ficam pausados.
+conectados entre si; nenhuma nova falha depois da coleta. Só há retomada com
+pelo menos dois dos três nós configurados. Um sobrevivente sozinho fica pausado
+até um nó caído voltar (seção da reentrada). Se um membro proposto cai durante a
+coleta, o coordenador refaz a proposta sem ele, com época maior; quem já cortou
+aceita a proposta refeita pelo mesmo coordenador e devolve a mesma captura.
 
 \textbf{Quem coordena.} Na queda do líder, o Bully elege o maior ID vivo. Na queda
 de um membro comum, o líder continua. Nos dois casos, o coordenador é o maior ID
@@ -262,7 +265,12 @@ por UUID fica disponível antes de novos envios. Se um RESUME se perder, dados
 novos esperam com 503 até sua retransmissão. Cada controle é idempotente e
 reenviado pela etapa que o aguarda. Encarnações já substituídas são descartadas,
 evitando que pacotes do processo anterior causem nova suspeita após a admissão.
-Como na T05, uma nova falha durante essa transição fica fora da garantia.
+O líder também admite quando está sozinho e pausado sem maioria: um membro
+suspeito que volta com outra encarnação entra, e a nova visão reúne o sobrevivente
+e o entrante. Isso é seguro sem partições, porque toda mensagem confirmada exigiu
+o ACK do sobrevivente. Por isso o JOIN vale para um líder ativo ou pausado, e o
+entrante conta a si mesmo na maioria. Uma falha nova depois da coleta (instalação
+ou retomada) fica fora da garantia.
 
 
 \section{Contrato v3}
@@ -330,8 +338,8 @@ ativo). Tentativa pendente ou recusada é reenviada com o mesmo UUID.
 
 \section{Decisões ainda abertas e validação}
 Ainda sem tratamento: limpeza dos identificadores de pacotes
-processados (guardados sem limite durante a execução), falhas novas durante uma
-transição (inclusive do coordenador) e partições.
+processados (guardados sem limite durante a execução), falhas novas depois da
+coleta de uma transição (inclusive do coordenador) e partições.
 
 Validação da v1 (\msg{tests/}): uma simulação em memória intercala canais ao
 acaso, mantém FIFO em cada canal, repete pacotes e responde 503 a um nó ainda
@@ -378,6 +386,16 @@ derrubam e readmitem os nós 3, 1 e 2, conferindo reenvio confirmado sem duplica
 Compose, com históricos completos iguais, mensagens durante a ausência e depois
 do retorno, e 45 envios concorrentes antes e depois de cada queda. A readmissão
 levou cerca de 2--3 segundos na execução observada, sem prazo garantido.
+
+Correção de 16/11: com mais de uma queda, o grupo não voltava. Um sobrevivente
+sozinho e pausado não recebia nem aceitava JOIN; a etapa de retomada esperava
+para sempre um membro já caído; e, em quedas simultâneas, o coordenador esperava
+na coleta o estado de um nó morto. Quatro regressões (duas quedas seguidas em
+três combinações e duas simultâneas) falharam antes da correção; depois, 401
+testes passaram. Com processos locais, as sequências 1-2, 1-3, 3-2 e uma de quatro
+quedas e quatro retornos se recuperaram. No Compose, após \msg{kill} dos nós 1 e
+2, o nó 3 ficou pausado; o \msg{start} do nó 2 retomou $\{2,3\}$ em 2,5 s e o do
+nó 1, $\{1,2,3\}$ em 2,8 s, com históricos iguais.
 
 \section*{Referências iniciais}
 Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026,

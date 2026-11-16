@@ -138,7 +138,7 @@ class No:
         Reenviar o mesmo UUID é seguro e serve também como consulta.
         """
         mensagem, erro = validar_mensagem(dados)
-        if erro:
+        if mensagem is None:
             ident = dados.get("id") if isinstance(dados, dict) else None
             return {"tipo": "recusada", "id": ident, "motivo": erro}
         uuid = mensagem["id"]
@@ -154,6 +154,7 @@ class No:
         if self.estado != ATIVO:
             return {"tipo": "recusada", "id": uuid, "motivo": f"nó {self.id} está {self.estado}; tente novamente"}
 
+        assert self.visao is not None and self.fila is not None  # nó ativo tem visão e fila
         t = self.relogio.tick()
         evento = Evento(self.visao.epoca, t, self.id, mensagem)
         self.fila.adicionar(evento)
@@ -214,9 +215,10 @@ class No:
         if bloqueio:
             return bloqueio
         mensagem, erro = validar_mensagem(pacote["mensagem"])
-        if erro:
+        if mensagem is None:
             return 400, {"erro": erro}
         t, origem = int(pacote["relogio"]), pacote["origem"]
+        assert self.visao is not None and self.fila is not None  # garantido por _bloqueio_de_dados
 
         self.relogio.receber(t)
         evento = Evento(self.visao.epoca, t, origem, mensagem)  # chave usa o carimbo ORIGINAL
@@ -233,6 +235,7 @@ class No:
         bloqueio = self._bloqueio_de_dados(pacote)
         if bloqueio:
             return bloqueio
+        assert self.visao is not None and self.fila is not None 
         self.relogio.receber(int(pacote["relogio"]))
         ref = pacote["evento"]
         chave = (self.visao.epoca, int(ref["origem"]), int(ref["relogio"]))
@@ -241,6 +244,7 @@ class No:
         return 200, {"ok": True}
 
     def _tentar_entregar(self) -> None:
+        assert self.fila is not None
         for evento in self.fila.retirar_prontos():
             self._entregar(evento)
 
@@ -291,6 +295,7 @@ class No:
         agora = self.agora()
         for membro in self._outros_membros():
             self.ultimo_contato[membro] = agora  # carência para o detector de falhas
+        assert self.visao is not None
         log.info("nó ativo na época %s; %d mensagens publicadas na retomada", self.visao.epoca, len(sufixo))
 
     def _pausar_aplicacao(self, motivo: str) -> None:
@@ -344,10 +349,24 @@ class No:
         self.instalar(proposta, historico=[], relogio=0)
         self._avancar_transicao(reenviar=True)
 
-    def _propor_reorganizacao(self) -> None:
+    def _abandonar_coleta(self, membro: int) -> None:
+        """Um membro proposto caiu antes da instalação: refaz a proposta sem ele.
+
+        Ninguém instalou nada ainda, e depois do corte este nó não processou dados,
+        então a pausa continua equivalente à captura. Sem maioria, fica pausado
+        aguardando que um nó caído volte (JOIN).
+        """
+        assert self._transicao is not None  # o chamador só abandona uma coleta em curso
+        abandonada = self._transicao.epoca
+        log.warning("nó %s caiu durante a coleta; proposta %s abandonada", membro, list(abandonada))
+        self.fase, self._corte, self._transicao, self._entrantes = None, None, None, {}
+        self._propor_reorganizacao(depois_de=abandonada)
+
+    def _propor_reorganizacao(self, depois_de=None) -> None:
         """Coordenador pausado propõe uma única nova visão com os membros não suspeitos."""
         if self.estado != REORGANIZANDO or self.fase is not None or self.coordenador != self.id:
             return
+        assert self.visao is not None
         membros = self.visao.membros - self.suspeitos
         if self.id != max(membros):
             return  # o Bully dá a coordenação ao maior ID vivo
@@ -356,24 +375,28 @@ class No:
                                  f"de {len(self.cfg.nos)} nós configurados")
             return
         anterior = self.visao.epoca
-        proposta = Visao((anterior[0] + 1, self.id), self.id, frozenset(membros))
+        contador = max(anterior[0], depois_de[0] if depois_de else 0) + 1
+        proposta = Visao((contador, self.id), self.id, frozenset(membros))
         log.warning("reorganização: propondo a visão %s para encerrar a época %s", proposta.json(), list(anterior))
         self._transicao, self._anterior = proposta, anterior
         self._entrantes = {}
         self._estados, self._prontos, self._instalacao = {}, set(), None
         self.erro_transicao = None
-        self._cortar(proposta.epoca, anterior, self.id, proposta.membros)
-        self._estados[self.id] = self._corte["captura"]
+        self._estados[self.id] = self._cortar(proposta.epoca, anterior, self.id, proposta.membros)
         self._avancar_transicao(reenviar=True)
 
-    def _cortar(self, transicao, anterior, coordenador: int, membros: frozenset) -> None:
-        """Corte definitivo: pausa e captura no mesmo passo síncrono, sem await."""
+    def _cortar(self, transicao, anterior, coordenador: int, membros: frozenset) -> dict:
+        """Corte definitivo: pausa e captura no mesmo passo síncrono, sem await.
+
+        Devolve a captura (histórico publicado, pendências e relógio).
+        """
+        assert self.visao is not None and self.fila is not None
         self.estado = REORGANIZANDO
         self.fase = CORTE
         self.coordenador = coordenador
         self.suspeitos = set(self.visao.membros - membros)  # a proposta define quem fica de fora
         self.erro_transicao = None
-        self._corte = {
+        self._corte = corte = {
             "transicao": tuple(transicao), "anterior": tuple(anterior),
             "coordenador": coordenador, "membros": frozenset(membros),
             "captura": {"historico": [e.json() for e in self.historico],
@@ -381,7 +404,7 @@ class No:
                         "relogio": self.relogio.valor},
         }
         self.rede.encerrar_epoca(anterior)  # filas e retries de MSG/ACK da visão encerrada
-        captura = self._corte["captura"]
+        captura = corte["captura"]
         log.warning("corte da época %s para a transição %s: %d entregues, %d pendentes, relógio %d",
                     list(anterior), list(transicao), len(captura["historico"]), len(captura["pendentes"]),
                     captura["relogio"])
@@ -389,6 +412,7 @@ class No:
     def _avancar_transicao(self, reenviar: bool) -> None:
         """Coleta (só na reorganização), INSTALL até todos READY, RESUME até todos ativos."""
         proposta = self._transicao
+        assert proposta is not None  
         outros = sorted(proposta.membros - {self.id})
         if self.fase == CORTE and not self._reconciliar_se_completo(reenviar):
             return
@@ -406,7 +430,7 @@ class No:
             for membro in outros:
                 self.rede.enviar_direto(membro, self._pacote_resume(proposta))
             return
-        faltam_ativos = [m for m in outros if not self._par_ativo_em(m, proposta)]
+        faltam_ativos = [m for m in outros if m not in self.suspeitos and not self._par_ativo_em(m, proposta)]
         if not faltam_ativos:
             log.info("transição %s concluída", proposta.epoca)
             self._transicao = None
@@ -417,6 +441,7 @@ class No:
     def _reconciliar_se_completo(self, reenviar: bool) -> bool:
         """Com o VIEW_STATE de todos, reconcilia e instala localmente; True se instalou."""
         proposta = self._transicao
+        assert proposta is not None and self._anterior is not None 
         # Um nó reiniciado não tem estado a reconciliar. Só os membros da visão
         # encerrada contribuem; o entrante recebe o resultado pela barreira comum.
         faltam = sorted(proposta.membros - set(self._entrantes) - set(self._estados))
@@ -443,15 +468,18 @@ class No:
         return estado.get("estado") == ATIVO and estado.get("epoca") == list(visao.epoca)
 
     def _pacote_prepare(self, proposta: Visao) -> dict:
+        assert self._anterior is not None
         return self._pacote("VIEW_PREPARE", transicao=list(proposta.epoca), anterior=list(self._anterior),
                             membros=sorted(proposta.membros))
 
     def _pacote_state(self) -> dict:
         corte = self._corte
+        assert corte is not None
         return self._pacote("VIEW_STATE", transicao=list(corte["transicao"]), anterior=list(corte["anterior"]),
                             **corte["captura"])
 
     def _pacote_install(self, proposta: Visao) -> dict:
+        assert self._instalacao is not None 
         return self._pacote(
             "VIEW_INSTALL",
             transicao=list(proposta.epoca),
@@ -468,8 +496,15 @@ class No:
         transicao, anterior = tuple(pacote["transicao"]), tuple(pacote["anterior"])
         membros, origem = frozenset(pacote["membros"]), pacote["origem"]
         if self._corte is not None:
-            if (self._corte["transicao"], self._corte["anterior"], self._corte["coordenador"]) != \
-                    (transicao, anterior, origem):
+            corte = self._corte
+            refeita = (self.fase == CORTE and (corte["anterior"], corte["coordenador"]) == (anterior, origem)
+                       and transicao > corte["transicao"] and self.id in membros
+                       and membros <= corte["membros"] and 2 * len(membros) > len(self.cfg.nos))
+            if refeita:
+                # O coordenador refez a proposta depois de outra queda: mesma captura, nova época.
+                corte.update(transicao=transicao, membros=membros)
+                self.suspeitos = set(self.visao.membros - membros)
+            elif (corte["transicao"], corte["anterior"], corte["coordenador"]) != (transicao, anterior, origem):
                 return 200, {"ignorado": "outra transição já está em curso"}
             # Retransmissão do PREPARE: devolve a mesma captura, sem capturar de novo.
         else:
@@ -570,7 +605,7 @@ class No:
         if self.fase is not None:
             return
         for par, estado in sorted(self.estado_pares.items()):
-            if (estado["estado"] != ATIVO or estado["coordenador"] != par
+            if (estado["estado"] not in (ATIVO, REORGANIZANDO) or estado["coordenador"] != par
                     or estado["epoca"] is None
                     or self.agora() - self.ultimo_contato[par] > self.cfg.suspeita_timeout):
                 continue
@@ -582,24 +617,26 @@ class No:
     def _receber_join(self, pacote: dict) -> Resposta:
         """O líder atual conduz a ampliação; o maior ID será líder da nova visão."""
         origem = pacote["origem"]
-        if (self.visao is None or self.estado != ATIVO or self.fase is not None
+        vivos = self.visao.membros - self.suspeitos if self.visao else frozenset()
+        # Sozinho, o líder fica pausado sem maioria; o retorno de um nó caído a restabelece.
+        sem_maioria = self.estado == REORGANIZANDO and 2 * len(vivos) <= len(self.cfg.nos)
+        if (self.visao is None or not (self.estado == ATIVO or sem_maioria) or self.fase is not None
                 or self._transicao is not None or self.coordenador != self.id
-                or origem in self.visao.membros or pacote["epoca"] is not None
+                or origem in vivos or pacote["epoca"] is not None
                 or tuple(pacote["anterior"]) != self.visao.epoca
                 or pacote["encarnacao"] != self._encarnacoes.get(origem)
                 or not self._pacote_da_encarnacao(pacote, pacote["encarnacao"])):
             return 200, {"ignorado": "JOIN fora de uma visão estável ou de outra encarnação"}
-        membros = self.visao.membros | {origem}
-        if 2 * len(self.visao.membros) <= len(self.cfg.nos):
-            return 200, {"ignorado": "admissão exige maioria dos sobreviventes"}
+        membros = vivos | {origem}
+        if 2 * len(membros) <= len(self.cfg.nos):
+            return 200, {"ignorado": "a admissão precisa formar maioria"}
         anterior = self.visao.epoca
         proposta = Visao((anterior[0] + 1, self.id), max(membros), membros)
         self._transicao, self._anterior = proposta, anterior
         self._entrantes = {origem: pacote["encarnacao"]}
         self._estados, self._prontos, self._instalacao = {}, set(), None
         log.info("reentrada do nó %s: propondo %s", origem, proposta.json())
-        self._cortar(proposta.epoca, anterior, self.id, membros)
-        self._estados[self.id] = self._corte["captura"]
+        self._estados[self.id] = self._cortar(proposta.epoca, anterior, self.id, membros)
         self._avancar_transicao(reenviar=True)
         return 200, {"ok": True}
 
@@ -616,7 +653,7 @@ class No:
                 or not proposta.membros <= self.cfg.nos.keys()
                 or proposta.lider != max(proposta.membros) or proposta.epoca[1] != pacote["origem"]
                 or proposta.epoca <= contexto["anterior"]
-                or 2 * len(proposta.membros - {self.id}) <= len(self.cfg.nos)):
+                or 2 * len(proposta.membros) <= len(self.cfg.nos)):
             return 200, {"ignorado": "snapshot sem JOIN correspondente"}
         if self.visao is not None:
             if self._admissao != contexto or self.visao != proposta or self.fase != INSTALADA:
@@ -694,14 +731,21 @@ class No:
         self.suspeitos.add(membro)
         log.warning("nó %s suspeito: %s", membro, motivo or f"sem heartbeat há {silencio:.1f}s")
         self._pausar_aplicacao(f"suspeita do nó {membro}")
+        if (self.fase == CORTE and self._transicao is not None and self._anterior is not None
+                and membro in self._transicao.membros and membro not in self._entrantes):
+            self._abandonar_coleta(membro)
+            return
         if self.fase is not None:
-            return  # nova falha durante a transição: fora do cenário suportado
+            return  # outra falha depois da instalação: fora do cenário suportado
         if membro == self.coordenador:
             self._agendar(self.iniciar_eleicao())
         elif self.coordenador == self.id:
             self._propor_reorganizacao()  # queda de membro comum: o líder coordena
 
     # ------------------------------------------------------------------ Bully
+
+    def _epoca_atual(self):
+        return self.visao.epoca if self.visao else None
 
     def _participa_da_eleicao(self) -> bool:
         # Durante uma transição (corte ou instalação), ninguém vota nem se anuncia.
@@ -711,9 +755,9 @@ class No:
         if self._eleicao_ativa or not self._participa_da_eleicao():
             return
         self._eleicao_ativa = True
-        epoca = self.visao.epoca
+        epoca = self._epoca_atual()
         try:
-            while self._participa_da_eleicao() and self.visao.epoca == epoca:
+            while self._participa_da_eleicao() and self._epoca_atual() == epoca:
                 self._recebeu_ok = False
                 self._anuncio.clear()
                 maiores = [m for m in self._outros_membros() if m > self.id and m not in self.suspeitos]
@@ -722,7 +766,7 @@ class No:
                     self.rede.enviar_direto(destino, self._pacote("ELECTION"))
                 if maiores:
                     await asyncio.sleep(self.cfg.eleicao_timeout)
-                if not self._participa_da_eleicao() or self.visao.epoca != epoca:
+                if not self._participa_da_eleicao() or self._epoca_atual() != epoca:
                     return  # a transição pode até já ter retomado durante a espera
                 if not self._recebeu_ok:
                     # Bully: os maiores que não responderam são tratados como falhos.
