@@ -408,6 +408,8 @@ class No:
         log.warning("corte da época %s para a transição %s: %d entregues, %d pendentes, relógio %d",
                     list(anterior), list(transicao), len(captura["historico"]), len(captura["pendentes"]),
                     captura["relogio"])
+        return captura
+    
 
     def _avancar_transicao(self, reenviar: bool) -> None:
         """Coleta (só na reorganização), INSTALL até todos READY, RESUME até todos ativos."""

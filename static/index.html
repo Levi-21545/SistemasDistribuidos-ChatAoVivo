@@ -78,9 +78,53 @@
   }
   .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--cinza); }
   .ativo .ponto { background: var(--verde); box-shadow: 0 0 0 3px color-mix(in srgb, var(--verde) 25%, transparent); }
-  .reorganizando .ponto { background: var(--ambar); animation: pulsar 1s infinite; }
+  .reorganizando .ponto, .sincronizando .ponto { background: var(--ambar); animation: pulsar 1s infinite; }
   .desconectado .ponto { background: var(--vermelho); }
   @keyframes pulsar { 50% { opacity: .35; } }
+
+  .botao-painel {
+    margin-left: auto; border: 1px solid var(--borda); background: var(--painel);
+    color: var(--texto); border-radius: 999px; padding: 3px 10px;
+    font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .botao-painel:hover { border-color: var(--destaque); }
+
+  /* Painel detalhado do cluster (T08) */
+  .painel-cluster {
+    padding: 12px 20px; border-bottom: 1px solid var(--borda);
+    background: color-mix(in srgb, var(--fundo) 30%, var(--painel));
+    display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;
+  }
+  .painel-cluster.oculto { display: none; }
+  .grade-nos {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  }
+  .card-no {
+    border: 1px solid var(--borda); border-radius: 10px; padding: 8px 12px;
+    background: var(--painel); display: flex; flex-direction: column; gap: 4px;
+  }
+  .card-no.lider { border-color: var(--destaque); }
+  .card-no.suspeito { border-color: var(--vermelho); opacity: .85; }
+  .card-topo { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
+  .tag {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; font-weight: 600;
+    border: 1px solid var(--borda); color: var(--suave);
+  }
+  .tag.ok { color: var(--verde); border-color: color-mix(in srgb, var(--verde) 40%, var(--borda)); }
+  .tag.alerta { color: var(--ambar); border-color: color-mix(in srgb, var(--ambar) 40%, var(--borda)); }
+  .tag.erro { color: var(--vermelho); border-color: color-mix(in srgb, var(--vermelho) 40%, var(--borda)); }
+  .card-meta { color: var(--suave); font-size: 11.5px; display: flex; justify-content: space-between; gap: 6px; }
+  .painel-rodape {
+    display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--suave); font-size: 12px;
+  }
+  .painel-rodape b { color: var(--texto); font-weight: 600; }
+  .alerta-transicao {
+    padding: 6px 10px; border-radius: 8px; font-size: 12px;
+    background: color-mix(in srgb, var(--ambar) 14%, var(--painel));
+    border: 1px solid color-mix(in srgb, var(--ambar) 40%, var(--borda));
+    color: var(--texto);
+  }
+  .alerta-transicao.oculto { display: none; }
 
   /* Mensagens */
   main { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 2px; }
@@ -137,7 +181,8 @@
   dialog .enviar { margin-top: 14px; width: 100%; padding: 10px; }
 
   @media (max-width: 560px) {
-    header, .estado, #form { padding-left: 16px; padding-right: 16px; }
+    header, .estado, .painel-cluster, #form { padding-left: 16px; padding-right: 16px; }
+    .grade-nos { grid-template-columns: 1fr; }
     main { padding: 16px; }
     .linha { max-width: 90%; }
   }
@@ -159,8 +204,21 @@
     <span>líder <b id="lider">—</b></span>
     <span>época <b id="epoca">—</b></span>
     <span>relógio <b id="relogio">—</b></span>
+    <span>membros <b id="membros">—</b></span>
     <span>mensagens <b id="total">0</b></span>
+    <button type="button" class="botao-painel" id="botao-painel" title="Mostrar/ocultar painel do cluster">Painel ▾</button>
   </div>
+
+  <section class="painel-cluster" id="painel-cluster" aria-label="Painel do cluster">
+    <div class="grade-nos" id="grade-nos"></div>
+    <div class="painel-rodape">
+      <span>encarnação <b id="encarnacao">—</b></span>
+      <span>suspeitos <b id="suspeitos">nenhum</b></span>
+      <span>fila hold-back <b id="fila-pendentes">0</b></span>
+      <span>fase <b id="fase-no">estável</b></span>
+    </div>
+    <div class="alerta-transicao oculto" id="transicao-info"></div>
+  </section>
 
   <main id="mensagens"></main>
 
@@ -189,6 +247,7 @@ const entregues = new Set();
 let historico = [];
 let ws;
 let apelido = lerApelido();
+let ultimoEstadoNo = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -307,6 +366,10 @@ function reenviar(id) {
   desenhar();
 }
 
+function reenviarTodasPendentes() {
+  for (const id of pendentes.keys()) reenviar(id);
+}
+
 function conectar() {
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.onmessage = (e) => {
@@ -315,7 +378,7 @@ function conectar() {
       historico = []; entregues.clear();
       d.mensagens.forEach((m, i) => registrarEntrega(m, i + 1));
       $("conexao").textContent = `conectado ao nó ${d.no}`;
-      for (const id of pendentes.keys()) reenviar(id);
+      reenviarTodasPendentes();
     } else if (d.tipo === "entregue") {
       registrarEntrega(d, d.posicao);
     } else if (d.tipo === "confirmada") {
@@ -334,6 +397,87 @@ function conectar() {
   };
 }
 
+function desenharPainelCluster(e) {
+  const grade = $("grade-nos");
+  grade.replaceChildren();
+  if (!e) {
+    $("membros").textContent = "—";
+    $("encarnacao").textContent = "—";
+    $("suspeitos").textContent = "—";
+    $("fila-pendentes").textContent = "0";
+    $("fase-no").textContent = "desconectado";
+    $("transicao-info").className = "alerta-transicao oculto";
+    return;
+  }
+
+  const membros = e.visao ? e.visao.membros : [];
+  const suspeitos = new Set(e.suspeitos || []);
+  $("membros").textContent = membros.length ? `[${membros.join(", ")}]` : "—";
+  $("encarnacao").textContent = e.encarnacao || "—";
+  $("suspeitos").textContent = suspeitos.size ? [...suspeitos].map(n => `nó ${n}`).join(", ") : "nenhum";
+  $("fila-pendentes").textContent = (e.pendentes || []).length;
+  $("fase-no").textContent = e.fase || "estável";
+
+  const idsConhecidos = new Set([e.no, ...membros]);
+  Object.keys(e.filas_saida || {}).forEach(k => idsConhecidos.add(Number(k)));
+  Object.keys(e.ultimo_contato || {}).forEach(k => idsConhecidos.add(Number(k)));
+
+  for (const id of [...idsConhecidos].sort((a, b) => a - b)) {
+    const ehLocal = id === e.no;
+    const ehLider = id === e.coordenador;
+    const ehSuspeito = suspeitos.has(id);
+    const naVisao = membros.includes(id);
+
+    const card = elemento("div", "card-no" + (ehLider ? " lider" : "") + (ehSuspeito ? " suspeito" : ""));
+    const topo = elemento("div", "card-topo");
+    const tituloNo = `Nó ${id}` + (ehLocal ? " (este)" : "") + (ehLider ? " ★" : "");
+    topo.append(elemento("span", "", tituloNo));
+
+    let statusTexto = ehLocal ? e.estado : (ehSuspeito ? "suspeito" : (naVisao ? "na visão" : "fora da visão"));
+    let statusClasse = "tag";
+    if (ehSuspeito) statusClasse += " erro";
+    else if (ehLocal && e.estado === "ativo" || (!ehLocal && naVisao)) statusClasse += " ok";
+    else statusClasse += " alerta";
+    topo.append(elemento("span", statusClasse, statusTexto));
+
+    const meta = elemento("div", "card-meta");
+    if (ehLocal) {
+      meta.append(
+        elemento("span", "", `relógio: ${e.relogio}`),
+        elemento("span", "", `entregues: ${e.entregues}`)
+      );
+    } else {
+      const contato = e.ultimo_contato && e.ultimo_contato[id] !== undefined
+        ? `heartbeat: ${e.ultimo_contato[id]}s`
+        : "heartbeat: —";
+      const fila = e.filas_saida && e.filas_saida[id] !== undefined
+        ? `fila saída: ${e.filas_saida[id]}`
+        : "fila saída: 0";
+      meta.append(elemento("span", "", contato), elemento("span", "", fila));
+    }
+
+    card.append(topo, meta);
+    grade.append(card);
+  }
+
+  const infoTransicao = $("transicao-info");
+  if (e.transicao) {
+    infoTransicao.className = "alerta-transicao";
+    const partes = [];
+    if (e.transicao.papel) partes.push(`papel: ${e.transicao.papel}`);
+    if (e.transicao.epoca) partes.push(`proposta: (${e.transicao.epoca.join(", ")})`);
+    if (e.transicao.etapa) partes.push(`etapa: ${e.transicao.etapa}`);
+    if (e.transicao.aguardando && e.transicao.aguardando.length) {
+      partes.push(`aguardando nós: [${e.transicao.aguardando.join(", ")}]`);
+    }
+    if (e.transicao.erro) partes.push(`aviso: ${e.transicao.erro}`);
+    infoTransicao.textContent = "Transição de visão: " + partes.join(" · ");
+  } else {
+    infoTransicao.className = "alerta-transicao oculto";
+    infoTransicao.textContent = "";
+  }
+}
+
 function mostrarEstado(e) {
   const pilula = $("pilula");
   const estado = e ? e.estado : "desconectado";
@@ -343,6 +487,14 @@ function mostrarEstado(e) {
   $("epoca").textContent = e && e.visao ? `(${e.visao.epoca.join(", ")})` : "—";
   $("relogio").textContent = e ? e.relogio : "—";
   $("botao").disabled = !e || e.estado !== "ativo";
+
+  desenharPainelCluster(e);
+
+  // Se o nó acabou de retomar o estado ativo, reenvia tentativas pendentes/recusadas mantendo o mesmo UUID.
+  if (estado === "ativo" && ultimoEstadoNo !== "ativo" && pendentes.size > 0) {
+    reenviarTodasPendentes();
+  }
+  ultimoEstadoNo = estado;
 }
 
 async function atualizarEstado() {
@@ -353,6 +505,12 @@ async function atualizarEstado() {
     mostrarEstado(null);
   }
 }
+
+$("botao-painel").onclick = () => {
+  const painel = $("painel-cluster");
+  const oculto = painel.classList.toggle("oculto");
+  $("botao-painel").textContent = oculto ? "Painel ▸" : "Painel ▾";
+};
 
 $("form").onsubmit = (e) => {
   e.preventDefault();
