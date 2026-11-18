@@ -8,7 +8,8 @@ inicial, reorganização após a queda de um nó e reentrada por JOIN/SNAPSHOT
 (T02–T06), cliente web com reconexão preservando UUID (T07) e painel do cluster
 com cenários de concorrência, retry, queda e retorno validados no Compose (T08;
 evidências em [docs/evidencias/](docs/evidencias/)).
-Pendentes: README e ensaio da avaliação (T09), relatório e apresentação (T10).
+Para reproduzir e demonstrar, veja [Reprodução para avaliação](#reprodução-para-avaliação) (T09).
+Pendente: relatório e apresentação (T10).
 
 ## Por onde começar
 
@@ -117,7 +118,7 @@ No Linux/macOS, troque `.\.venv\Scripts\` por `.venv/bin/` em todos os comandos.
 .\.venv\Scripts\python -m pytest
 ```
 
-Resultado atual: **401 testes aprovados** em 16/11, com Python 3.13 local (cerca de 31 segundos);
+Resultado atual: **404 testes aprovados** em 18/11, no contêiner de testes (cerca de 35 segundos);
 A T06 acrescenta testes de admissão, barreiras, controles atrasados e integração com reinício. Os testes:
 
 - simulam a rede em 200 cenários aleatórios, com pacotes repetidos e fora de
@@ -285,9 +286,110 @@ e `COORDENADOR_TIMEOUT` (3).
 
 ## Reprodução para avaliação
 
-O roteiro final deve permitir subir três nós, abrir clientes em nós diferentes,
-observar a ordenação, derrubar o líder e conferir a recuperação. Hoje isso está
-coberto pelo teste manual acima, por `scripts/validar_compose.py` e pelo roteiro
-Docker de reentrada. Faltam a validação final do cliente, o painel e o ensaio cronometrado.
+Roteiro para outra pessoa subir três nós, abrir dois clientes, observar a
+ordenação e derrubar o líder, do zero. Só precisa de **Docker** (Docker Desktop
+no Windows/macOS, ou Docker Engine com o plugin Compose no Linux) e de um
+navegador. Não é preciso instalar Python. Os comandos funcionam iguais no
+PowerShell, no Prompt de Comando e no bash. Execute-os na pasta do projeto.
+
+### Passo a passo
+
+**1. Subir os três nós** (a primeira vez baixa a imagem do Python e instala as
+dependências, de 20 segundos a 1 minuto conforme a internet; as seguintes,
+poucos segundos):
+
+```sh
+docker compose up -d --build
+```
+
+Confira que os três estão ativos:
+
+```sh
+docker compose logs no1 no2 no3 | grep "nó ativo"
+```
+
+Devem aparecer três linhas `nó ativo na época (1, 3)`. No Windows sem `grep`,
+abra <http://localhost:8001/estado> e confira `"estado":"ativo"`.
+
+**2. Abrir dois clientes**, cada um em um nó e com uma pessoa diferente:
+
+- <http://localhost:8001/?apelido=Ana>
+- <http://localhost:8002/?apelido=Beto>
+
+O painel no topo de cada aba mostra o nó, o estado, o **líder (nó 3)**, a
+**época `(1, 3)`**, o relógio de Lamport e um cartão por nó. Ele se atualiza a
+cada 1,5 segundo, então pode mostrar uma mudança com esse atraso.
+
+**3. Observar a ordenação.** Envie mensagens pelas duas abas, inclusive quase ao
+mesmo tempo. As duas abas mostram as mesmas mensagens **na mesma ordem**. Abaixo
+de cada mensagem aparecem a posição e o carimbo usado para ordenar, por exemplo
+`#3 · relógio (10, nó 2)`.
+
+**4. Derrubar o líder:**
+
+```sh
+docker compose stop no3
+```
+
+Em 4 a 6 segundos, as duas abas passam por **reorganizando** e voltam a
+**ativo**, agora com **líder nó 2** e época **`(2, 2)`**; o cartão do nó 3 fica
+como suspeito. O histórico continua igual nas duas abas, e o botão Enviar
+volta a funcionar. Envie uma mensagem para confirmar.
+
+**5. Trazer o nó 3 de volta:**
+
+```sh
+docker compose start no3
+```
+
+Em cerca de 3 a 4 segundos, os três nós ficam ativos na época **`(3, 2)`**, com líder
+nó 3. Abra <http://localhost:8003/?apelido=Caio>: o nó 3 recebeu todo o
+histórico, inclusive o que foi enviado enquanto estava fora.
+
+**6. Encerrar:**
+
+```sh
+docker compose down
+```
+
+O estado fica só na memória: subir de novo começa um grupo vazio.
+
+### Problemas comuns
+
+| Sintoma | O que fazer |
+| --- | --- |
+| `port is already allocated` | Outro programa usa 8001–8003. Feche-o, ou rode `docker compose down` se for uma execução anterior. |
+| Abas mostram **desconectado** | Os contêineres não estão de pé: `docker compose ps`. |
+| Os nós ficam em `sincronizando` | Os três precisam subir juntos na primeira vez. Rode `docker compose down` e repita o passo 1. |
+| Nada muda depois de editar o código | Use sempre `--build` no passo 1. |
+
+Para ver o que cada nó está fazendo: `docker compose logs -f no1` (eleição,
+suspeitas, corte, instalação da visão). O JSON completo do estado fica em
+`http://localhost:800X/estado`, e o histórico em `http://localhost:800X/historico`.
+
+### Roteiro da demonstração (8 minutos)
+
+Antes de começar: rode o passo 1 com antecedência, deixe as abas de Ana (8001)
+e Beto (8002) abertas lado a lado e um terminal na pasta do projeto.
+
+| Tempo | O que mostrar | O que falar |
+| --- | --- | --- |
+| 0:00–1:00 | Slide de arquitetura | Três nós equivalentes, HTTP entre nós, WebSocket para os clientes, estado em memória. |
+| 1:00–1:45 | Painel das duas abas | Nós, líder 3, época `(1, 3)`, relógio de Lamport; a visão inicial é proposta pelo maior ID. |
+| 1:45–3:15 | Passo 3: Ana e Beto conversam, com envios quase simultâneos | Multicast com MSG/ACK em canais FIFO; a ordem total vem de (relógio, nó); o carimbo de cada mensagem mostra isso. |
+| 3:15–5:15 | Passo 4: `docker compose stop no3` e envio depois da retomada | Heartbeat (suspeita em 3 s), eleição Bully (nó 2), corte da época, reconciliação dos históricos e nova visão `(2, 2)`; o chat pausa durante a troca e não perde mensagens confirmadas. |
+| 5:15–6:45 | Passo 5: `docker compose start no3` e aba do Caio (8003) | JOIN/SNAPSHOT: o nó volta, recebe histórico e relógio e entra na época `(3, 2)`; UUIDs já entregues não são duplicados. |
+| 6:45–7:30 | Evidências em `docs/evidencias/` | Concorrência (45 mensagens), retry com nó congelado, queda e retorno dos três nós, reconexão do cliente com o mesmo UUID; 404 testes automáticos. |
+| 7:30–8:00 | Encerramento | Limitações: estado em memória, sem tolerância a partição (com um só nó vivo o chat pausa: escolhemos consistência, CAP). |
+
+Os passos 1 a 5 foram seguidos em 18/11/2026 no Docker Desktop (Windows), com
+os resultados descritos acima: ver [docs/evidencias/t09-roteiro.log](docs/evidencias/t09-roteiro.log).
+O ensaio completo da demonstração, com as falas e cronometrado, ainda precisa
+ser feito pelo grupo.
+
+### Outras validações
+
+Além do roteiro manual, os scripts de `scripts/` repetem os cenários de forma
+automática (ver "Com Docker" acima) e guardam a saída em `docs/evidencias/`.
 
 O relatório final será escrito em TeX e deverá declarar o uso de IA.
