@@ -5,8 +5,10 @@ Trabalho final de Sistemas Distribuídos de 2026, por Levi, Henri, André e Gabr
 Implementados (aguardando revisão do grupo): transporte FIFO com retry,
 multicast ordenado por Lamport, heartbeat, eleição Bully, bootstrap da visão
 inicial, reorganização após a queda de um nó e reentrada por JOIN/SNAPSHOT
-(T02–T06). A T06 tem testes em Docker e roteiro Compose de queda e retorno.
-Pendentes: concluir a validação do cliente, painel e ensaio da avaliação (T07–T10).
+(T02–T06), cliente web com reconexão preservando UUID (T07) e painel do cluster
+com cenários de concorrência, retry, queda e retorno validados no Compose (T08;
+evidências em [docs/evidencias/](docs/evidencias/)).
+Pendentes: README e ensaio da avaliação (T09), relatório e apresentação (T10).
 
 ## Por onde começar
 
@@ -18,6 +20,8 @@ Pendentes: concluir a validação do cliente, painel e ensaio da avaliação (T0
   queda do líder e de membro comum no Docker Compose.
 - [scripts/validar_reentrada.sh](scripts/validar_reentrada.sh): validação de queda
   e retorno dos três nós, com todos os clientes e testes em contêineres.
+- [scripts/validar_retry.sh](scripts/validar_retry.sh): congela o nó 1 por 1 s
+  durante envios e confirma o retry do transporte sem duplicar nem reorganizar.
 - [Documento de protocolo em TeX](docs/protocolo.tex): formatos de mensagens,
   fluxos de comunicação, confirmação e reorganização após queda.
 - [Relatório em TeX](docs/relatorio.tex): arquitetura, decisões, algoritmos,

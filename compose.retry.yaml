@@ -1,0 +1,14 @@
+# Uso automatizado: sh scripts/validar_retry.sh
+# Timeout HTTP curto (0,5 s) para o congelamento de 1 s do nó 1 forçar retry sem
+# chegar à suspeita (3 s). O nó 2 registra cada tentativa falha em DEBUG.
+services:
+  no1:
+    environment:
+      HTTP_TIMEOUT: "0.5"
+  no2:
+    environment:
+      HTTP_TIMEOUT: "0.5"
+      LOG_LEVEL: "DEBUG"
+  no3:
+    environment:
+      HTTP_TIMEOUT: "0.5"

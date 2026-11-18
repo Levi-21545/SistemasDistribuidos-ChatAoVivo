@@ -1,0 +1,30 @@
+T07 - cliente web e reconexão preservando UUID
+Data: 2026-11-18. Compose com os três nós (docker compose up -d --build), página
+http://localhost:8001 aberta num navegador. Os passos usam o próprio código da
+página (formulário, ws, pendentes, reenviar); só WebSocket.prototype.send foi
+envolvido para registrar os UUIDs enviados, sem mudar o comportamento.
+
+1) Conexão cai no momento do envio
+   ws.close() e, em seguida, envio pelo formulário: "T07: enviada durante a queda da conexão".
+   - logo após o envio: pendentes = [a98860e3-f6ed-49c7-83cc-f9187092be60] (nada enviado: socket fechando)
+   - a página reconectou sozinha em ~1 s ("conectado ao nó 1") e reenviou a pendente
+   - envios registrados: 1, UUID a98860e3-f6ed-49c7-83cc-f9187092be60; pendentes = 0 depois da entrega
+
+2) Resposta perdida: o cliente reenvia a mesma tentativa já entregue
+   pendentes.set(mesmo UUID) + reenviar(UUID)
+   - envios registrados: 2, ambos com o UUID a98860e3-f6ed-49c7-83cc-f9187092be60
+   - o nó respondeu "confirmada" (pendentes = 0) e não criou outra mensagem
+   - cópias do UUID: 1 no histórico da página; /historico dos nós 8001, 8002 e 8003: 1 mensagem cada
+
+3) Clientes em nós distintos conversam
+   cliente WebSocket em ws://localhost:8002/ws envia "T07: resposta de um cliente do nó 2";
+   a página do nó 1 responde pelo formulário.
+   Histórico exibido na página do nó 1, na ordem total:
+     validacao-t07: T07: enviada durante a queda da conexão   (#1, relógio (1, nó 1))
+     cliente-no2:   T07: resposta de um cliente do nó 2       (#2, relógio (5, nó 2))
+     validacao-t07: T07: réplica do cliente do nó 1           (#3, relógio (9, nó 1))
+   Painel no mesmo momento: nó 1 ativo, líder nó 3, época (1, 3), relógio 13,
+   membros [1, 2, 3], nós 2 e 3 "na visão", suspeitos nenhum, fase estável.
+
+Limitação: as pendentes ficam na memória da página; recarregar a página as descarta.
+A reconexão do WebSocket (sem recarregar) as preserva, que é o critério da T07.

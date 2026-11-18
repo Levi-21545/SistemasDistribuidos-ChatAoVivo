@@ -1,0 +1,332 @@
+2026-11-18T10:49:13-03:00
+ Image chat-t06-testes Building 
+ Image chat-t06-no1 Building 
+ Image chat-t06-no2 Building 
+ Image chat-t06-no3 Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.90kB 0.1s done
+#1 DONE 0.1s
+
+#2 [no2 internal] load build definition from Dockerfile
+#2 transferring dockerfile: 30B 0.0s
+#2 transferring dockerfile: 583B 0.2s done
+#2 DONE 0.6s
+
+#3 [no1 internal] load metadata for docker.io/library/python:3.13-slim
+#3 ...
+
+#4 [auth] library/python:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#3 [no3 internal] load metadata for docker.io/library/python:3.13-slim
+#3 DONE 6.9s
+
+#5 [testes internal] load .dockerignore
+#5 transferring context: 32B
+#5 transferring context: 87B 0.5s done
+#5 DONE 0.6s
+
+#6 [no1 internal] load build context
+#6 DONE 0.0s
+
+#7 [no1 base 1/6] FROM docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+#7 resolve docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+#7 resolve docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 0.9s done
+#7 DONE 0.9s
+
+#6 [no3 internal] load build context
+#6 transferring context: 433B 0.2s done
+#6 DONE 0.4s
+
+#8 [testes internal] load build context
+#8 ...
+
+#9 [no2 base 3/6] COPY requirements.txt .
+#9 CACHED
+
+#10 [no2 base 4/6] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [no2 base 5/6] COPY app ./app
+#11 CACHED
+
+#12 [no2 base 2/6] WORKDIR /app
+#12 CACHED
+
+#13 [no2 base 6/6] COPY static ./static
+#13 CACHED
+
+#12 [no1 base 2/6] WORKDIR /app
+#12 CACHED
+
+#9 [no1 base 3/6] COPY requirements.txt .
+#9 CACHED
+
+#10 [no1 base 4/6] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [no1 base 5/6] COPY app ./app
+#11 CACHED
+
+#13 [no1 base 6/6] COPY static ./static
+#13 CACHED
+
+#8 [testes internal] load build context
+#8 transferring context: 196.82kB 0.9s done
+#8 DONE 2.6s
+
+#14 [no3] exporting to image
+#14 exporting layers 0.1s done
+#14 exporting manifest sha256:069b89e383fda976aa41745caf60c0d2b56428688837964cd5d9ff0030832c86
+#14 ...
+
+#13 [testes base 6/6] COPY static ./static
+#13 CACHED
+
+#14 [no3] exporting to image
+#14 exporting manifest sha256:069b89e383fda976aa41745caf60c0d2b56428688837964cd5d9ff0030832c86 0.5s done
+#14 exporting config sha256:a6754deac07b76708f6389f747189cd3da1f7c2727d8048b37d00928b84cb6da
+#14 ...
+
+#15 [testes base 5/6] COPY app ./app
+#15 CACHED
+
+#16 [testes base 6/6] COPY static ./static
+#16 CACHED
+
+#17 [testes testes 1/5] COPY requirements-dev.txt .
+#17 CACHED
+
+#18 [testes testes 4/5] COPY scripts ./scripts
+#18 CACHED
+
+#19 [testes testes 2/5] RUN pip install --no-cache-dir -r requirements-dev.txt
+#19 CACHED
+
+#20 [testes testes 3/5] COPY tests ./tests
+#20 CACHED
+
+#12 [testes base 2/6] WORKDIR /app
+#12 CACHED
+
+#21 [testes base 4/6] RUN pip install --no-cache-dir -r requirements.txt
+#21 CACHED
+
+#22 [testes base 3/6] COPY requirements.txt .
+#22 CACHED
+
+#23 [testes testes 5/5] COPY pyproject.toml .
+#23 CACHED
+
+#24 [testes] exporting to image
+#24 exporting layers done
+#24 exporting manifest sha256:f2ab23df4c55d9b2f79286a082ed6e4668f5c52e87ca12b9ae2438b70c165508
+#24 exporting manifest sha256:f2ab23df4c55d9b2f79286a082ed6e4668f5c52e87ca12b9ae2438b70c165508 0.3s done
+#24 exporting config sha256:fea2346686ec39c993566a9bc4902e317760d3600c2d7b911054139361cfc4fb
+#24 exporting config sha256:fea2346686ec39c993566a9bc4902e317760d3600c2d7b911054139361cfc4fb 0.2s done
+#24 exporting attestation manifest sha256:ef542f8d721e045e625330a39d5fdce505cc7ad744e536f16ec0ba213857c113
+#24 exporting attestation manifest sha256:ef542f8d721e045e625330a39d5fdce505cc7ad744e536f16ec0ba213857c113 0.2s done
+#24 exporting manifest list sha256:80956de8c2b031a3b4fb50968007842b2cf75b4831d2d38b093e729af5cc6a45
+#24 exporting manifest list sha256:80956de8c2b031a3b4fb50968007842b2cf75b4831d2d38b093e729af5cc6a45 0.2s done
+#24 naming to docker.io/library/chat-t06-testes:latest
+#24 ...
+
+#25 [no1] exporting to image
+#25 exporting layers done
+#25 exporting manifest sha256:86f5e77fdba7b7513425587335e2d7c56e636d16a2c407a5fb6410c0a5759e8c 0.6s done
+#25 exporting config sha256:26da5c776562f5554458fa124bfc2bd791b51960a6a8306de537179418b8c79e 0.3s done
+#25 exporting attestation manifest sha256:416fdeb4e1878638fc675a661b0c4400b24f20aa820ecc7f5bf58fd3f0d60c5b 0.5s done
+#25 exporting manifest list sha256:a612b8e32c33c56274ff8f846c1f60dc31ba80a70d57130baf21a47bfc77c398 0.2s done
+#25 naming to docker.io/library/chat-t06-no1:latest 0.1s done
+#25 unpacking to docker.io/library/chat-t06-no1:latest 0.1s done
+#25 DONE 2.7s
+
+#26 [no2] exporting to image
+#26 exporting layers 0.1s done
+#26 exporting manifest sha256:54825a69324ebb7efb3275a723b3a47d5f5de187782753e712f56f61ec494d63 0.6s done
+#26 exporting config sha256:67719a47d903e366754c4b982ad06c7af3bc112d0f991e4d39d7f06d628363c0 0.3s done
+#26 exporting attestation manifest sha256:eb5de66c61de25c3e6f6da2a78bb3b2f568d3b0cce5ae467fd53a32595970791 0.5s done
+#26 exporting manifest list sha256:89195c9d81018fedfc7824d4b0b554aa776561f78b1b2d855958706671003150 0.2s done
+#26 naming to docker.io/library/chat-t06-no2:latest 0.1s done
+#26 unpacking to docker.io/library/chat-t06-no2:latest 0.2s done
+#26 DONE 2.7s
+
+#24 [testes] exporting to image
+#24 naming to docker.io/library/chat-t06-testes:latest 0.2s done
+#24 unpacking to docker.io/library/chat-t06-testes:latest
+#24 unpacking to docker.io/library/chat-t06-testes:latest 0.3s done
+#24 ...
+
+#14 [no3] exporting to image
+#14 exporting config sha256:a6754deac07b76708f6389f747189cd3da1f7c2727d8048b37d00928b84cb6da 0.4s done
+#14 exporting attestation manifest sha256:04bf607e96a5d4f37f044c7b11c91c002063079fbee21695b9ad7bb2c6cf7efc 0.4s done
+#14 exporting manifest list sha256:38f703af3121d9233a367421556237f2db3961eaebb355acccb59fd653c8cf0c 0.2s done
+#14 naming to docker.io/library/chat-t06-no3:latest 0.1s done
+#14 unpacking to docker.io/library/chat-t06-no3:latest 0.1s done
+#14 DONE 2.6s
+
+#24 [testes] exporting to image
+#24 DONE 2.1s
+
+#27 [no2] resolving provenance for metadata file
+#27 DONE 0.5s
+
+#28 [no1] resolving provenance for metadata file
+#28 DONE 0.5s
+
+#29 [no3] resolving provenance for metadata file
+#29 DONE 0.4s
+
+#30 [testes] resolving provenance for metadata file
+#30 DONE 0.1s
+ Image chat-t06-no3 Built 
+ Image chat-t06-testes Built 
+ Image chat-t06-no1 Built 
+ Image chat-t06-no2 Built 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Created 
+ Network chat-t06_default Created 
+ Container chat-t06-no3-1 Creating 
+ Container chat-t06-no2-1 Creating 
+ Container chat-t06-no1-1 Creating 
+ Container chat-t06-no1-1 Created 
+ Container chat-t06-no3-1 Created 
+ Container chat-t06-no2-1 Created 
+ Container chat-t06-no3-1 Starting 
+ Container chat-t06-no1-1 Starting 
+ Container chat-t06-no2-1 Starting 
+ Container chat-t06-no3-1 Started 
+ Container chat-t06-no2-1 Started 
+ Container chat-t06-no1-1 Started 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Created 
+ Volume chat-t06_evidencias Created 
+ Container chat-t06-testes-run-07a657b34ff1 Creating 
+ Container chat-t06-testes-run-07a657b34ff1 Created 
+nó 3: 45 mensagens concorrentes iguais antes da queda
+ Container chat-t06-no3-1 Killing 
+ Container chat-t06-no3-1 Killed 
+ Container chat-t06-testes-run-5f1cc4c7ede0 Creating 
+ Container chat-t06-testes-run-5f1cc4c7ede0 Created 
+nó 3: sobreviventes retomaram e entregaram durante a ausência
+ Container chat-t06-no3-1 Starting 
+ Container chat-t06-no3-1 Started 
+ Container chat-t06-testes-run-4b5896fc2e44 Creating 
+ Container chat-t06-testes-run-4b5896fc2e44 Created 
+nó 3: readmitido em 0.7s; UUID confirmado sem duplicar; novo envio e 45 mensagens concorrentes iguais nos três nós
+ Container chat-t06-no2-1 Stopping 
+ Container chat-t06-no1-1 Stopping 
+ Container chat-t06-no3-1 Stopping 
+ Container chat-t06-no3-1 Stopped 
+ Container chat-t06-no3-1 Removing 
+ Container chat-t06-no3-1 Removed 
+ Container chat-t06-no2-1 Stopped 
+ Container chat-t06-no2-1 Removing 
+ Container chat-t06-no1-1 Stopped 
+ Container chat-t06-no1-1 Removing 
+ Container chat-t06-no2-1 Removed 
+ Container chat-t06-no1-1 Removed 
+ Volume chat-t06_evidencias Removing 
+ Network chat-t06_default Removing 
+ Volume chat-t06_evidencias Removed 
+ Network chat-t06_default Removed 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Created 
+ Network chat-t06_default Created 
+ Container chat-t06-no3-1 Creating 
+ Container chat-t06-no1-1 Creating 
+ Container chat-t06-no2-1 Creating 
+ Container chat-t06-no2-1 Created 
+ Container chat-t06-no1-1 Created 
+ Container chat-t06-no3-1 Created 
+ Container chat-t06-no3-1 Starting 
+ Container chat-t06-no1-1 Starting 
+ Container chat-t06-no2-1 Starting 
+ Container chat-t06-no1-1 Started 
+ Container chat-t06-no2-1 Started 
+ Container chat-t06-no3-1 Started 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Created 
+ Volume chat-t06_evidencias Created 
+ Container chat-t06-testes-run-9fb6a9137557 Creating 
+ Container chat-t06-testes-run-9fb6a9137557 Created 
+nó 1: 45 mensagens concorrentes iguais antes da queda
+ Container chat-t06-no1-1 Killing 
+ Container chat-t06-no1-1 Killed 
+ Container chat-t06-testes-run-836b552f28a8 Creating 
+ Container chat-t06-testes-run-836b552f28a8 Created 
+nó 1: sobreviventes retomaram e entregaram durante a ausência
+ Container chat-t06-no1-1 Starting 
+ Container chat-t06-no1-1 Started 
+ Container chat-t06-testes-run-b42299c18958 Creating 
+ Container chat-t06-testes-run-b42299c18958 Created 
+nó 1: readmitido em 1.0s; UUID confirmado sem duplicar; novo envio e 45 mensagens concorrentes iguais nos três nós
+ Container chat-t06-no2-1 Stopping 
+ Container chat-t06-no3-1 Stopping 
+ Container chat-t06-no1-1 Stopping 
+ Container chat-t06-no2-1 Stopped 
+ Container chat-t06-no2-1 Removing 
+ Container chat-t06-no2-1 Removed 
+ Container chat-t06-no3-1 Stopped 
+ Container chat-t06-no3-1 Removing 
+ Container chat-t06-no3-1 Removed 
+ Container chat-t06-no1-1 Stopped 
+ Container chat-t06-no1-1 Removing 
+ Container chat-t06-no1-1 Removed 
+ Network chat-t06_default Removing 
+ Volume chat-t06_evidencias Removing 
+ Volume chat-t06_evidencias Removed 
+ Network chat-t06_default Removed 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Creating 
+ Network chat-t06_default Created 
+ Network chat-t06_default Created 
+ Container chat-t06-no3-1 Creating 
+ Container chat-t06-no1-1 Creating 
+ Container chat-t06-no2-1 Creating 
+ Container chat-t06-no1-1 Created 
+ Container chat-t06-no3-1 Created 
+ Container chat-t06-no2-1 Created 
+ Container chat-t06-no3-1 Starting 
+ Container chat-t06-no1-1 Starting 
+ Container chat-t06-no2-1 Starting 
+ Container chat-t06-no3-1 Started 
+ Container chat-t06-no1-1 Started 
+ Container chat-t06-no2-1 Started 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Creating 
+ Volume chat-t06_evidencias Created 
+ Volume chat-t06_evidencias Created 
+ Container chat-t06-testes-run-f17d6686049a Creating 
+ Container chat-t06-testes-run-f17d6686049a Created 
+nó 2: 45 mensagens concorrentes iguais antes da queda
+ Container chat-t06-no2-1 Killing 
+ Container chat-t06-no2-1 Killed 
+ Container chat-t06-testes-run-094f9d6c34e1 Creating 
+ Container chat-t06-testes-run-094f9d6c34e1 Created 
+nó 2: sobreviventes retomaram e entregaram durante a ausência
+ Container chat-t06-no2-1 Starting 
+ Container chat-t06-no2-1 Started 
+ Container chat-t06-testes-run-898370e5eab8 Creating 
+ Container chat-t06-testes-run-898370e5eab8 Created 
+nó 2: readmitido em 1.4s; UUID confirmado sem duplicar; novo envio e 45 mensagens concorrentes iguais nos três nós
+ Container chat-t06-no1-1 Stopping 
+ Container chat-t06-no2-1 Stopping 
+ Container chat-t06-no3-1 Stopping 
+ Container chat-t06-no1-1 Stopped 
+ Container chat-t06-no1-1 Removing 
+ Container chat-t06-no1-1 Removed 
+ Container chat-t06-no3-1 Stopped 
+ Container chat-t06-no3-1 Removing 
+ Container chat-t06-no3-1 Removed 
+ Container chat-t06-no2-1 Stopped 
+ Container chat-t06-no2-1 Removing 
+ Container chat-t06-no2-1 Removed 
+ Volume chat-t06_evidencias Removing 
+ Network chat-t06_default Removing 
+ Volume chat-t06_evidencias Removed 
+ Network chat-t06_default Removed 

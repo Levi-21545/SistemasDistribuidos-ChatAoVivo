@@ -1,0 +1,187 @@
+2026-11-18T10:53:49-03:00
+ Image chat-t08-testes Building 
+ Image chat-t08-no1 Building 
+ Image chat-t08-no2 Building 
+ Image chat-t08-no3 Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.90kB 0.0s done
+#1 DONE 0.0s
+
+#2 [no3 internal] load build definition from Dockerfile
+#2 transferring dockerfile: 583B done
+#2 DONE 0.0s
+
+#3 [no3 internal] load metadata for docker.io/library/python:3.13-slim
+#3 DONE 0.8s
+
+#4 [no2 internal] load .dockerignore
+#4 transferring context: 87B done
+#4 DONE 0.0s
+
+#5 [no3 internal] load build context
+#5 transferring context: 433B done
+#5 DONE 0.0s
+
+#6 [testes internal] load build context
+#6 transferring context: 2.79kB done
+#6 DONE 0.0s
+
+#7 [no3 base 1/6] FROM docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+#7 resolve docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 0.1s done
+#7 resolve docker.io/library/python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 0.1s done
+#7 DONE 0.1s
+
+#8 [no3 base 5/6] COPY app ./app
+#8 CACHED
+
+#9 [no3 base 4/6] RUN pip install --no-cache-dir -r requirements.txt
+#9 CACHED
+
+#10 [no3 base 3/6] COPY requirements.txt .
+#10 CACHED
+
+#11 [testes base 6/6] COPY static ./static
+#11 CACHED
+
+#12 [testes base 3/6] COPY requirements.txt .
+#12 CACHED
+
+#13 [testes base 2/6] WORKDIR /app
+#13 CACHED
+
+#14 [testes base 6/6] COPY static ./static
+#14 CACHED
+
+#15 [testes base 4/6] RUN pip install --no-cache-dir -r requirements.txt
+#15 CACHED
+
+#16 [testes testes 1/5] COPY requirements-dev.txt .
+#16 CACHED
+
+#17 [testes testes 2/5] RUN pip install --no-cache-dir -r requirements-dev.txt
+#17 CACHED
+
+#18 [testes base 5/6] COPY app ./app
+#18 CACHED
+
+#19 [testes testes 3/5] COPY tests ./tests
+#19 CACHED
+
+#20 [no1] exporting to image
+#20 exporting layers done
+#20 exporting manifest sha256:5ffe802f15a7e4a65e0012e24a70d5b018540fbd90f6c85f35cfc48caf223d40 done
+#20 exporting config sha256:1b234c15cee8c74cd704c8fd0eeeac756fad0d725b18e54c4c13878aad15d7fd 0.0s done
+#20 exporting attestation manifest sha256:e7d65da56b04ad480496009d8a01bf3deca5c604c2c1fff002d584bbf02fa8c0
+#20 ...
+
+#21 [testes testes 4/5] COPY scripts ./scripts
+#21 DONE 0.1s
+
+#20 [no1] exporting to image
+#20 exporting attestation manifest sha256:e7d65da56b04ad480496009d8a01bf3deca5c604c2c1fff002d584bbf02fa8c0 0.1s done
+#20 exporting manifest list sha256:c19246a0496b4c9b3da48ec350958b9859599871ed7fefafd84614cd7f25f0db
+#20 exporting manifest list sha256:c19246a0496b4c9b3da48ec350958b9859599871ed7fefafd84614cd7f25f0db 0.1s done
+#20 naming to docker.io/library/chat-t08-no1:latest 0.0s done
+#20 unpacking to docker.io/library/chat-t08-no1:latest
+#20 unpacking to docker.io/library/chat-t08-no1:latest 0.0s done
+#20 DONE 0.4s
+
+#22 [testes testes 5/5] COPY pyproject.toml .
+#22 DONE 0.3s
+
+#23 [no2] exporting to image
+#23 exporting layers done
+#23 exporting manifest sha256:bb4aac281bfbe90367e4e13eb590d7f87c756e9d0df8cf9f52eddd2d143beadd done
+#23 exporting config sha256:e9f3709509f0afdcb48c6bf138b9665719cc3b91d5a262a9fef58b870371cd98 0.0s done
+#23 exporting attestation manifest sha256:4a79aefd993108f328575b216ff7f36199ca4d9656131103383c8c847caa88c8 0.1s done
+#23 exporting manifest list sha256:650deb5be7bea08d742a4f22205b342dcf089c6ed5915a4f73bb4a01444a5bcf 0.1s done
+#23 naming to docker.io/library/chat-t08-no2:latest 0.0s done
+#23 unpacking to docker.io/library/chat-t08-no2:latest 0.0s done
+#23 DONE 0.4s
+
+#24 [no3] exporting to image
+#24 exporting layers done
+#24 exporting manifest sha256:1d9c19641c1cdb7373796430560390ec8226698d0953fa8fa1fba772fd075c97 done
+#24 exporting config sha256:d5413ad77256e7d161961c22127cc75a6c763a2417c23cc7c3a112ba8669587b 0.0s done
+#24 exporting attestation manifest sha256:db8d972fcc2c8e23466872d519e33aaf725446d7c8c4e5b9489e2eb065ffef43 0.1s done
+#24 exporting manifest list sha256:0e59951db4014a6f6913629bbd4cb9281b7be9cc2a867bb9cddc2742785ec7b8 0.1s done
+#24 naming to docker.io/library/chat-t08-no3:latest 0.0s done
+#24 unpacking to docker.io/library/chat-t08-no3:latest 0.0s done
+#24 DONE 0.5s
+
+#25 [testes] exporting to image
+#25 exporting layers 1.8s done
+#25 exporting manifest sha256:ae131b203a5a1c34eda059c8a1c466601da0a4035ce0e3b4ee61b568b40f952f 0.0s done
+#25 exporting config sha256:6f0cbf4d7271be63e4199594e4a177c19b6235165f16bc0a72847a2c390fb340 0.0s done
+#25 exporting attestation manifest sha256:ba270889a38351f8ea39ca53f5db7064505f32b43e18ef34cd0e8aab74b8c5f0
+#25 exporting attestation manifest sha256:ba270889a38351f8ea39ca53f5db7064505f32b43e18ef34cd0e8aab74b8c5f0 0.0s done
+#25 exporting manifest list sha256:f9ecd928b48b4bfb00e91100722daa5682e8d026c0a0a3426101ca348a375012 0.0s done
+#25 naming to docker.io/library/chat-t08-testes:latest done
+#25 unpacking to docker.io/library/chat-t08-testes:latest
+#25 unpacking to docker.io/library/chat-t08-testes:latest 0.1s done
+#25 DONE 2.2s
+
+#26 [no2] resolving provenance for metadata file
+#26 DONE 0.2s
+
+#27 [no1] resolving provenance for metadata file
+#27 DONE 0.2s
+
+#28 [no3] resolving provenance for metadata file
+#28 DONE 0.0s
+
+#29 [testes] resolving provenance for metadata file
+#29 DONE 0.0s
+ Image chat-t08-no3 Built 
+ Image chat-t08-testes Built 
+ Image chat-t08-no1 Built 
+ Image chat-t08-no2 Built 
+ Network chat-t08_default Creating 
+ Network chat-t08_default Creating 
+ Network chat-t08_default Created 
+ Network chat-t08_default Created 
+ Container chat-t08-no3-1 Creating 
+ Container chat-t08-no2-1 Creating 
+ Container chat-t08-no1-1 Creating 
+ Container chat-t08-no2-1 Created 
+ Container chat-t08-no1-1 Created 
+ Container chat-t08-no3-1 Created 
+ Container chat-t08-no1-1 Starting 
+ Container chat-t08-no3-1 Starting 
+ Container chat-t08-no2-1 Starting 
+ Container chat-t08-no1-1 Started 
+ Container chat-t08-no3-1 Started 
+ Container chat-t08-no2-1 Started 
+ Volume chat-t08_evidencias Creating 
+ Volume chat-t08_evidencias Creating 
+ Volume chat-t08_evidencias Created 
+ Volume chat-t08_evidencias Created 
+ Container chat-t08-testes-run-901c24ed57b3 Creating 
+ Container chat-t08-testes-run-901c24ed57b3 Created 
+três nós ativos na visão (1,3)
+ Container chat-t08-testes-run-60970d53bcd3 Creating 
+ Container chat-t08-testes-run-60970d53bcd3 Created 
+cliente conectado ao nó 2; aguardando o nó 1 congelar
+ Container chat-t08-no1-1 Paused 
+10 mensagens aceitas pelo nó 2 com o nó 1 congelado; nenhuma entregue ainda
+ Container chat-t08-no1-1 Unpaused 
+ Container chat-t08-testes-run-92ae690de741 Creating 
+ Container chat-t08-testes-run-92ae690de741 Created 
+após o unpause, as 10 mensagens chegaram em 0.1s, uma vez cada e na mesma ordem nos três nós; visão (1,3) mantida, sem suspeitos
+tentativas repetidas pelo canal FIFO do nó 2 para o nó 1: 2
+ Container chat-t08-no2-1 Stopping 
+ Container chat-t08-no1-1 Stopping 
+ Container chat-t08-no3-1 Stopping 
+ Container chat-t08-no1-1 Stopped 
+ Container chat-t08-no1-1 Removing 
+ Container chat-t08-no1-1 Removed 
+ Container chat-t08-no2-1 Stopped 
+ Container chat-t08-no2-1 Removing 
+ Container chat-t08-no2-1 Removed 
+ Container chat-t08-no3-1 Stopped 
+ Container chat-t08-no3-1 Removing 
+ Container chat-t08-no3-1 Removed 
+ Network chat-t08_default Removing 
+ Volume chat-t08_evidencias Removing 
+ Volume chat-t08_evidencias Removed 
+ Network chat-t08_default Removed 
