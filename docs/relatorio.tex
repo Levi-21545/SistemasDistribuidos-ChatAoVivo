@@ -1,243 +1,265 @@
-\documentclass[11pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[brazil]{babel}
+\usepackage[brazilian]{babel}
 \usepackage{lmodern}
-\usepackage[margin=2.1cm]{geometry}
-\usepackage{microtype,booktabs,tabularx,enumitem}
+\usepackage[margin=2.05cm]{geometry}
+\usepackage{microtype,booktabs,tabularx,enumitem,array,float}
+\usepackage[table]{xcolor}
+\usepackage{titlesec}
+\usepackage[font=small,labelfont=bf,skip=5pt]{caption}
+\usepackage{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
 \usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{RGB}{37, 74, 130}
+\definecolor{accentlight}{RGB}{242, 246, 252}
+\definecolor{muted}{RGB}{88, 100, 116}
+\definecolor{border}{RGB}{203, 213, 225}
+\definecolor{warnbg}{RGB}{254, 249, 239}
+\definecolor{warnborder}{RGB}{217, 155, 46}
+
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{5pt}
-\setlist{nosep,leftmargin=*}
+\setlength{\parskip}{4.3pt}
+\linespread{1.05}
+\setlist{nosep,leftmargin=1.35em,itemsep=2pt}
+
+\titleformat{\section}
+  {\large\bfseries\color{accent}}
+  {\thesection}{0.65em}{}
+  [\vspace{-0.45em}\color{border}\rule{\linewidth}{0.6pt}]
+\titlespacing*{\section}{0pt}{9pt}{4pt}
+
+\titleformat{\subsection}
+  {\normalsize\bfseries\color{accent!85!black}}
+  {\thesubsection}{0.55em}{}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+
 \newcommand{\msg}[1]{\texttt{\detokenize{#1}}}
-\title{Chat com ordenação\\\large Relatório final}
+
+\newtcolorbox{caixacap}[1]{
+  colback=accentlight,
+  colframe=border,
+  boxrule=0.6pt,
+  arc=3pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  before skip=5pt, after skip=5pt,
+  title={\textbf{\color{accent}#1}},
+  colbacktitle=accentlight,
+  attach title to upper={.\ }
+}
+
+\title{\textbf{Chat Distribuído com Ordenação Total}\\[2pt]
+\large Relatório Final -- Sistemas Distribuídos}
 \author{Levi \and Henri \and André \and Gabriel}
 \date{Novembro de 2026}
+
 \begin{document}
 \maketitle
-\vspace{-1.4em}
+\vspace{-1.7em}
 
-\section{Objetivo e arquitetura}
-O objetivo é um chat em que clientes conectados a nós diferentes recebem a
-\emph{mesma sequência} de mensagens e que continua funcionando depois da queda
-de um nó, sem perder o que já foi confirmado. A solução tem três nós equivalentes,
-cada um com uma cópia completa do histórico, executados no Docker Compose.
+\section{O problema e a arquitetura do sistema}
 
+Construir um chat com vários servidores esbarra rápido em um problema clássico de sistemas distribuídos: se duas pessoas enviam mensagens ao mesmo tempo para nós diferentes, a rede pode entregá-las em ordens distintas para cada participante. Sem algum mecanismo de acordo, cada usuário passa a enxergar uma conversa diferente na tela.
+
+Neste trabalho, implementamos um chat distribuído em que três nós equivalentes mantêm cópias em memória do mesmo histórico. Nossa meta foi atender a dois requisitos principais: garantir que clientes conectados a servidores diferentes recebam as mensagens na \emph{mesma ordem total} e permitir que o sistema continue operando depois da queda de um nó — inclusive do líder — sem perder o que já foi confirmado e readmitindo o nó quando ele volta.
+
+Cada nó roda em Python~3.13 com FastAPI e Uvicorn, conversando com os pares por HTTP e JSON (\msg{httpx}). Do lado do usuário, o cliente web foi escrito em HTML, CSS e JavaScript puro, conectado por WebSocket. No ambiente padrão, os três servidores sobem em contêineres separados via Docker Compose (\msg{no1}, \msg{no2} e \msg{no3}), expostos nas portas \msg{8001} a \msg{8003}. A Figura~\ref{fig:arquitetura} mostra essa organização.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  no/.style={draw=accent, thick, rounded corners=4pt, fill=accentlight, minimum width=2.75cm, minimum height=1.05cm, align=center},
+  cli/.style={draw=muted, rounded corners=4pt, fill=white, minimum width=2.2cm, minimum height=0.78cm, align=center},
+  fifo/.style={-{Stealth[length=2.0mm]}, thick, color=accent},
+  ctrl/.style={-{Stealth[length=2.0mm]}, dashed, color=muted},
+  ws/.style={{Stealth[length=1.8mm]}-{Stealth[length=1.8mm]}, thick, color=warnborder!85!black}
+]
+  \node[no] (n1) {\textbf{Nó 1} (\msg{no1})\\[-1pt]\scriptsize Estado + Lamport + Fila};
+  \node[no, right=2.7cm of n1] (n2) {\textbf{Nó 2} (\msg{no2})\\[-1pt]\scriptsize Estado + Lamport + Fila};
+  \node[no, below=1.05cm of $(n1)!0.5!(n2)$] (n3) {\textbf{Nó 3} (\msg{no3}, líder inicial)\\[-1pt]\scriptsize Estado + Lamport + Fila};
+
+  \node[cli, left=1.15cm of n1] (c1) {Cliente Web\\[-1pt]\scriptsize \msg{localhost:8001}};
+  \node[cli, right=1.15cm of n2] (c2) {Cliente Web\\[-1pt]\scriptsize \msg{localhost:8002}};
+  \node[cli, below=0.55cm of n3, minimum width=3.2cm] (c3) {Cliente / Painel HTTP\\[-1pt]\scriptsize \msg{:8003}, \msg{/estado}, \msg{/historico}};
+
+  \draw[ws] (c1) -- node[above, font=\scriptsize]{\msg{WS /ws}} (n1);
+  \draw[ws] (c2) -- node[above, font=\scriptsize]{\msg{WS /ws}} (n2);
+  \draw[ws] (n3) -- node[right, font=\scriptsize]{\msg{WS /ws} + \msg{GET}} (c3);
+
+  \draw[fifo] ([yshift=3.5pt]n1.east) -- node[above, font=\scriptsize]{\msg{CanalFIFO} (\msg{MSG}/\msg{ACK})} ([yshift=3.5pt]n2.west);
+  \draw[ctrl] ([yshift=-3.5pt]n2.west) -- node[below, font=\scriptsize]{Direto (controle)} ([yshift=-3.5pt]n1.east);
+
+  \draw[fifo] ([xshift=-3pt]n1.south) |- ([yshift=3.5pt]n3.west);
+  \draw[ctrl] ([yshift=-3.5pt]n3.west) -| ([xshift=3pt]n1.south);
+
+  \draw[fifo] ([xshift=3pt]n2.south) |- ([yshift=3.5pt]n3.east);
+  \draw[ctrl] ([yshift=-3.5pt]n3.east) -| ([xshift=-3pt]n2.south);
+\end{tikzpicture}
+\caption{Arquitetura do cluster no Docker Compose: canais internos sobre \msg{POST /interno/pacote}, WebSocket para os chats e rotas \msg{/estado} e \msg{/historico} para inspeção em qualquer nó.}
+\label{fig:arquitetura}
+\end{figure}
+
+No código, separamos as responsabilidades em módulos enxutos: \msg{main.py} expõe as rotas (\msg{/ws}, \msg{/interno/pacote}, \msg{/estado}, \msg{/historico} e \msg{/}); \msg{no.py} reúne a máquina de estados e as transições de visão; \msg{ordenacao.py} implementa a fila de retenção (\emph{hold-back}); \msg{relogio.py} cuida do relógio de Lamport; \msg{reconciliacao.py} junta os históricos após quedas; e \msg{transporte.py} gerencia o envio HTTP e o cache de DNS. Na página web, um painel consulta \msg{/estado} a cada 1,5~s para mostrar líder, época, relógio, suspeitos e fase da transição.
+
+\subsection*{Modelo de falhas e hipóteses}
+
+Adotamos o modelo \emph{crash-stop}: quando um nó falha, ele simplesmente para (como em \msg{docker compose stop} ou \msg{kill}) e, se voltar, reinicia do zero com a memória limpa. Para que o protocolo garanta suas propriedades, assumimos quatro condições: (1) ocorre no máximo uma queda por vez; (2) os nós sobreviventes continuam se comunicando; (3) nenhuma nova falha acontece depois da etapa de coleta de estado durante uma transição; e (4) nós saudáveis respondem dentro dos prazos configurados (heartbeat a cada 1~s, suspeita após 3~s e espera de eleição de 1~s).
+
+Como o grupo tem três nós e exige maioria para prosseguir, pelo menos dois precisam estar vivos e sincronizados para o chat aceitar mensagens. Se dois caírem, o sobrevivente isolado pausa os envios até outro voltar. Partições de rede arbitrárias, falsas suspeitas persistentes e a parada simultânea dos três nós — que apaga o histórico em RAM — ficam fora das garantias.
+
+\section{Decisões de projeto}
+
+Em vez de construir um protocolo monolítico, fizemos escolhas pragmáticas para manter o comportamento previsível e fácil de inspecionar. A Tabela~\ref{tab:decisoes} resume essas decisões, e os pontos mais importantes vêm logo abaixo.
+
+\begin{table}[H]
+\centering
+\small
 \begin{tabularx}{\linewidth}{@{}lX@{}}
 \toprule
-Parte & Solução implementada \\
+\textbf{Aspecto} & \textbf{Decisão adotada e justificativa} \\
 \midrule
-Aplicação & Python 3.13 e FastAPI; cliente em HTML, CSS e JavaScript puro. \\
-Execução & Três contêineres no Docker Compose, um por nó, em uma máquina. \\
-Transporte & WebSocket entre cliente e nó; HTTP com JSON entre os nós. \\
-Descoberta & Nomes \msg{no1}..\msg{no3} resolvidos pelo DNS do Compose, com cache de IP. \\
-Ordenação & Multicast totalmente ordenado por relógio de Lamport, com ACK de todos os membros. \\
-Coordenação & Heartbeat para detectar falhas e Bully para escolher o coordenador. \\
-Recuperação & Troca de visão com época; reentrada de nós por JOIN/SNAPSHOT. \\
-Estado & Histórico, fila de pendências e relógio em memória, em cada nó. \\
-Interface & Chat com apelido e um painel com nós, líder, época, relógios e fase da transição. \\
+Papel do líder & O líder (maior ID) coordena apenas visões e reentradas; não numera mensagens. \\
+Transporte interno & \msg{CanalFIFO} com retry para \msg{MSG}/\msg{ACK}; envio direto em tentativa única para controle. \\
+Reinício sem disco & Cada execução sorteia uma \msg{encarnacao} no \msg{pacote_id}, evitando colisão de IDs. \\
+DNS no Docker & Cache de IP (\msg{Resolvedor}) com no máximo uma busca por nó, sem travar o \msg{uvloop}. \\
+Cliente e persistência & UUID gerado no navegador; histórico mantido apenas em memória RAM nos nós. \\
 \bottomrule
 \end{tabularx}
+\caption{Principais decisões de projeto adotadas no trabalho.}
+\label{tab:decisoes}
+\end{table}
 
-Cada nó expõe \msg{/ws} para os clientes, \msg{/interno/pacote} para os outros
-nós e \msg{/estado} e \msg{/historico} para inspeção. O painel do cliente consulta
-\msg{/estado} a cada 1,5 s. Mensagens de dados (\msg{MSG} e \msg{ACK}) passam por
-um canal FIFO confiável por destino; mensagens de controle (heartbeat, eleição e
-troca de visão) usam envio único e são repetidas pela própria lógica do nó.
+\textbf{Nós equivalentes e líder apenas para visão.} Em vez de centralizar a numeração das mensagens em um líder sequenciador, deixamos os três nós equivalentes na operação normal, ordenando tudo via Lamport. O líder (sempre o maior ID ativo) só entra em cena para orquestrar mudanças de grupo (bootstrap, saída após queda e reentrada). Isso simplifica o caminho comum de envio, com um trade-off assumido pela simplicidade: como toda entrega espera o \msg{ACK} de todos os membros da visão, a latência do chat acompanha o nó ativo mais lento.
 
-\section{Hipóteses e garantias}
-O modelo de falha é \emph{crash-stop}: um nó para (\msg{docker compose stop} ou
-\msg{kill}) e, se voltar, volta sem estado, com nova encarnação. Admite-se uma
-queda por vez, comunicação funcionando entre os sobreviventes, nenhuma nova falha
-durante uma troca de visão e respostas dos nós saudáveis dentro dos tempos
-configurados (heartbeat a cada 1 s, suspeita após 3 s, eleição em 1 s).
+\textbf{Dois caminhos de transporte e proteção contra reinício.} Mensagens de dados (\msg{MSG} e \msg{ACK}) usam um \msg{CanalFIFO} por destino: enviam um \msg{POST} por vez e só avançam após HTTP~\msg{200}. Em erros de rede, timeouts ou HTTP~\msg{5xx}, o mesmo pacote é repetido (backoff exponencial de 0,1~s até 1~s), e o receptor deduplica pelo \msg{pacote_id}. Se receber~\msg{400}, o canal trava naquele pacote para não violar a ordem FIFO, sem travar os outros destinos. Já pacotes de controle (\msg{HEARTBEAT}, eleição e visão) são idempotentes e usam envio direto único, pois o ciclo de 1~s do próprio nó se encarrega de reenviá-los quando necessário. Para que um contêiner reiniciado do zero não reutilize um \msg{pacote_id} antigo, o identificador tem o formato \msg{<origem>-<encarnacao>-<sequencia>}, com uma string aleatória de 8 caracteres gerada a cada inicialização. Se um membro ativo aparece subitamente com outra encarnação, os pares o reconhecem como reiniciado na hora, sem esperar o timeout de 3~s.
 
-Nesse cenário, o sistema garante: (i) todos os clientes recebem as mensagens na
-mesma ordem total; (ii) nenhuma mensagem aparece duas vezes, mesmo reenviada
-com o mesmo UUID; (iii) uma mensagem entregue a algum cliente é preservada, como
-prefixo, depois da troca de visão; (iv) um nó que volta recebe o histórico
-completo antes de voltar a participar. Uma tentativa que o cliente não viu
-confirmada pode ter sido entregue; o reenvio com o mesmo UUID resolve a dúvida
-sem duplicar.
+\textbf{O caso do DNS no Docker (\msg{Resolvedor}).} Uma decisão importante veio de um defeito observado na prática, já nos testes com contêineres. Localmente em \msg{127.0.0.1}, tudo respondia rápido; no Docker Compose, porém, resolver o nome de um contêiner parado (\msg{no3}) demorava cerca de 4~s. Como cada nó mandava heartbeats de 1 em 1~s, as resoluções presas esgotavam o pool de resolução (4 threads no \msg{uvloop}), atrasando mensagens de eleição e visão para os nós vivos. Criamos então o \msg{Resolvedor}, que guarda o último IP de cada nó em cache e limita a no máximo uma consulta DNS em curso por destino, renovada só em falha de conexão ou após 10~s.
 
-São necessários dois dos três nós para operar. Partições de rede, falsas
-suspeitas persistentes e falhas durante uma transição ficam fora da garantia.
-Reiniciar os três nós perde o histórico.
+\textbf{UUID no cliente e escolhas de escopo.} No navegador, cada envio gera um UUID v4 guardado em memória até chegar o evento \msg{entregue}. Receber \msg{aceita} do servidor indica apenas que o multicast começou, não que foi confirmado. Ao reconectar ou quando o nó volta a \msg{ativo}, a página reenvia as pendências com o mesmo UUID; se o servidor já tiver entregado a mensagem, responde \msg{confirmada} sem duplicar. Pela simplicidade do protótipo, recarregar a aba limpa as pendências locais, o histórico fica apenas em RAM e o conjunto \msg{_processados} de deduplicação cresce sem limpeza periódica.
 
-\section{Algoritmos e decisões de projeto}
+\section{Algoritmos usados}
+
+Dentro de cada nó, todas as funções que alteram estado executam de forma síncrona no loop do \msg{asyncio}. Validar pacotes, avançar o relógio e enfileirar o multicast acontecem de maneira atômica, sem travas manuais; apenas a espera pelos prazos de eleição é assíncrona. A seguir detalhamos os quatro algoritmos do protocolo.
+
+\subsection*{Ordenação total com relógio de Lamport e fila \emph{hold-back}}
+
+Cada nó mantém um contador inteiro $L$ (\msg{RelogioLamport}). Ao aceitar uma mensagem do cliente, o nó faz $L \leftarrow L + 1$, cria o evento com o carimbo $(t, \mathrm{origem})$, insere-o na \msg{FilaOrdenada} (contando o próprio envio como reconhecimento da origem) e enfileira o \msg{MSG} para os demais membros da visão. Ao receber um \msg{MSG}, o receptor atualiza $L \leftarrow \max(L, t) + 1$, mas guarda o evento na fila usando a chave \textbf{original} $(t, \mathrm{origem})$ — nunca seu relógio atualizado —, incrementa $L$ novamente e envia um \msg{ACK} a todos os pares. Caso um \msg{ACK} chegue antes do \msg{MSG} correspondente, a fila o armazena separado por chave até o evento aparecer.
+
+A mensagem no topo da fila (menor $(t, \mathrm{origem})$) só é entregue quando acumula o \msg{ACK} de todos os membros da visão. É a combinação dessa espera com os canais FIFO que garante a ordem total: quando um nó $j$ emite um \msg{ACK} para $(t, i)$, seu relógio já passou de $t$; pelo FIFO, qualquer \msg{MSG} enviado por $j$ antes desse \msg{ACK} já chegou ao destino, e qualquer \msg{MSG} futuro de $j$ terá relógio maior que $t$. Logo, ninguém mais pode enviar um evento mais antigo. Se um cliente reconectar em outro nó e reenviar o mesmo UUID antes de o evento se espalhar, as duas ocorrências seguem a ordem total e todos os nós entregam apenas a primeira que sair da fila, ignorando a segunda.
+
+\subsection*{Detecção de falha por heartbeat e eleição com Bully}
+
+A cada 1~s, cada nó envia um \msg{HEARTBEAT} para todos os nós configurados (inclusive os fora da visão, permitindo descoberta no bootstrap e no retorno). Após 3~s sem contato — ou ao notar mudança de \msg{encarnacao} — o par entra em \msg{suspeitos} e o nó passa de \msg{ativo} para \msg{reorganizando}. Nesse estado, ele recusa novos envios de clientes, mas continua processando \msg{MSG} e \msg{ACK} da visão corrente até ocorrer o corte.
+
+Quando o suspeito é o coordenador atual, os sobreviventes com visão executam o algoritmo \textbf{Bully}: enviam \msg{ELECTION} aos membros de ID maior não suspeitos e esperam 1~s por \msg{OK}. Sem resposta, o nó assume a coordenação enviando \msg{COORDINATOR}; se receber \msg{OK}, aguarda até 3~s pelo anúncio do vencedor antes de tentar de novo. Nós em \msg{sincronizando} ficam de fora da eleição, e durante uma transição em curso ninguém vota nem se anuncia. O ponto essencial é que vencer o Bully \emph{não} libera o chat: apenas define quem tem autoridade para propor a próxima troca de visão.
+
+\subsection*{Troca de visão, corte síncrono e reconciliação}
+
+Havendo maioria viva ($2 \cdot |membros| > 3$), o coordenador propõe a época $(c + 1, \mathrm{coordenador})$ com os membros não suspeitos. A transição percorre uma barreira em duas etapas, mostrada na Figura~\ref{fig:transicao}.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  node distance=0.32cm,
+  etapa/.style={draw=accent, rounded corners=4pt, fill=accentlight, minimum height=0.84cm, minimum width=2.25cm, align=center},
+  corte/.style={draw=warnborder!90!black, thick, rounded corners=4pt, fill=warnbg, minimum height=0.84cm, minimum width=2.25cm, align=center},
+  seta/.style={-{Stealth[length=2.0mm]}, thick, color=accent!80!black}
+]
+  \node[etapa] (s) {\textbf{Suspeita / Bully}\\ \scriptsize pausa clientes};
+  \node[corte, right=of s] (p) {\textbf{Corte síncrono}\\ \scriptsize \msg{VIEW_PREPARE}};
+  \node[etapa, right=of p] (r) {\textbf{Reconciliação}\\ \scriptsize \msg{VIEW_STATE}};
+  \node[etapa, right=of r, minimum width=2.85cm] (i) {\textbf{Instalação}\\ \scriptsize \msg{INSTALL} / \msg{SNAPSHOT}};
+  \node[etapa, right=of i] (f) {\textbf{Retomada}\\ \scriptsize \msg{READY} $\to$ \msg{RESUME}};
+
+  \draw[seta] (s) -- (p);
+  \draw[seta] (p) -- (r);
+  \draw[seta] (r) -- (i);
+  \draw[seta] (i) -- (f);
+\end{tikzpicture}
+\caption{Fluxo da troca de visão: envios e publicação de mensagens novas só liberam após o \msg{VIEW_RESUME}.}
+\label{fig:transicao}
+\end{figure}
+
+O coração da recuperação é o \textbf{corte} disparado por \msg{VIEW_PREPARE}. Em um único passo síncrono (sem \msg{await}), cada participante entra na fase \msg{corte}, captura seu histórico publicado, suas pendências na fila e seu relógio, e chama \msg{encerrar_epoca} nos canais FIFO para descartar \msg{MSG}/\msg{ACK} da visão encerrada. Dados antigos que ainda cheguem recebem HTTP~\msg{200} com aviso de descarte. Se outro membro cair durante essa coleta, o coordenador abandona a proposta e refaz uma nova sem ele (enquanto houver maioria).
+
+Reunidos todos os \msg{VIEW_STATE}, a função \msg{reconciliar} exige que os históricos entregues sejam prefixos uns dos outros e adota o mais longo como base imutável. Em seguida, ordena as pendências da visão encerrada pela chave original $(t, \mathrm{origem})$ sem exigir ACK do nó caído. Há um cuidado sutil nessa etapa: verificamos a deduplicação por UUID \emph{antes} de checar a ordem das entregas. Isso porque um nó mais adiantado pode ter entregado $A(1,1)$, descartado a duplicata $A(6,2)$ e entregado $B(11,1)$, enquanto outro nó ainda guardava $A(6,2)$ pendente. Se uma pendência de UUID inédito tentar entrar antes de uma mensagem já confirmada — ou houver divergência de histórico ou conteúdo —, a reconciliação falha com \msg{ErroReconciliacao} e mantém os nós pausados.
+
+Aprovada a junção, o coordenador envia \msg{VIEW_INSTALL}; os membros instalam a visão na fase \msg{instalada} (ainda devolvendo \msg{503} a dados novos) e respondem \msg{VIEW_READY}. Só com todos os \msg{READY} em mãos o coordenador retoma e envia \msg{VIEW_RESUME}, momento em que cada nó publica aos seus clientes locais apenas o sufixo que ainda não tinha entregado.
+
+\subsection*{Reentrada de nós com \msg{JOIN} e \msg{SNAPSHOT}}
+
+Um nó reiniciado acorda em \msg{sincronizando}, sem visão e com nova \msg{encarnacao}. Ao observar heartbeats recentes, descobre o coordenador e passa a enviar \msg{JOIN}. Mesmo um líder sozinho e pausado sem maioria aceita esse \msg{JOIN}, porque toda mensagem confirmada antes exigiu o \msg{ACK} dele. Os sobreviventes fazem o mesmo corte e reconciliação; o entrante recebe \msg{SNAPSHOT} (com visão, histórico completo, relógio e sua encarnação), valida as invariantes, reconstrói o mapa de UUIDs entregues diretamente do histórico e responde \msg{VIEW_READY}, só entrando em operação após o \msg{VIEW_RESUME}. Na época proposta $(c+1, \mathrm{proponente})$, a liderança volta ao maior ID do grupo: quando o nó~3 retorna à visão $(2,2)$, o resultado é a época $(3,2)$ com líder~3, conduzida pelo nó~2 até a retomada.
+
+\section{Trade-offs de consistência e disponibilidade (CAP)}
+
+O sistema entrega \textbf{ordem total idêntica} para todos os clientes e garante \textbf{preservação de prefixo} após trocas de visão: mensagens confirmadas não somem nem mudam de lugar. É importante notar que essa garantia não é linearizabilidade, pois a ordem segue as chaves lógicas $(t, \mathrm{origem})$ de Lamport e não o instante físico em que cada usuário clicou em Enviar.
+
+Diante de falhas, escolhemos claramente \textbf{consistência acima de disponibilidade}. Durante suspeitas, eleições e trocas de visão, os nós recusam novas mensagens de clientes — uma pausa que levou de 4,2 a 5,3~s na queda do líder no Compose. Se dois dos três nós caem, o sobrevivente solitário fica pausado por falta de maioria, evitando aceitar mensagens que teriam de ser descartadas ou reordenadas caso outro subgrupo operasse em paralelo.
+
+Essa trava de maioria teve um efeito concreto no defeito de DNS citado na Seção~2: quando as consultas presas impediram o nó~1 de ouvir o nó~2 na eleição, o nó~1 se declarou coordenador sozinho enquanto o nó~2 também se via coordenador de $\{1, 2\}$. Como nenhuma proposta alcançou maioria junto com todos os \msg{VIEW_STATE} exigidos, nenhum dos dois instalou uma visão própria. O chat ficou indisponível, mas os históricos permaneceram intactos.
+
+\begin{caixacap}{Nuance acadêmica frente ao teorema CAP (Gilbert e Lynch, 2002)}
+Apesar de priorizar consistência sobre disponibilidade no modelo assumido, o sistema não pode ser rotulado de forma simplista como ``CP'' no sentido estrito de Gilbert e Lynch. Primeiro, partições de rede não foram injetadas nem testadas como cenário completo. Segundo, detectores por timeout podem errar em redes assíncronas: uma falsa suspeita entre membros comuns (como observado ao congelar um nó por $\sim$2~s) deixa o grupo pausado mesmo sem queda real. Dentro do cenário \emph{crash-stop} suportado, porém, a diretriz é firme: sacrificar disponibilidade temporária para preservar o histórico confirmado.
+\end{caixacap}
+
+\section{O que foi testado, resultados e limitações}
+
+Validamos o sistema em três níveis complementares: simulação e testes unitários em memória, integração com processos reais em \msg{localhost} e cenários ponta a ponta no Docker Compose com DNS, WebSocket e navegador.
+
+\subsection*{Suíte automatizada (404 casos)}
+
+Executada no contêiner de testes com Python~3.13 e \msg{pytest}, a suíte soma \textbf{404 testes aprovados}. Com uma rede simulada em memória (\msg{RedeSimulada}) que intercala canais FIFO ao acaso, duplica pacotes e responde \msg{503} a nós pausados, verificamos 200 sementes de envios concorrentes, 20 sementes de retomada tardia por retry, 15 sementes de queda do líder em pleno tráfego, quedas de membros comuns, 36 cenários de reentrada dos três nós (incluindo mensagens em trânsito e perda de cada controle) e 4 combinações de duas quedas seguidas ou simultâneas.
+
+No nível de unidade e transporte, testamos o relógio de Lamport, a fila ordenada, 10 casos puros de reconciliação (\msg{reconciliar}), o \msg{Resolvedor} com DNS lento simulado, o \msg{CanalFIFO} real contra \msg{httpx.MockTransport} (HTTP~\msg{500}, \msg{503}, falha de conexão, timeout, perda de resposta após processamento e bloqueio em \msg{400} sem furar a fila) e \textbf{61 pacotes malformados} recusados com \msg{400} antes de alterar o estado. Por fim, 7 testes de integração sobem três processos \msg{uvicorn} reais (\msg{18001}--\msg{18003}) validando bootstrap, 45 mensagens concorrentes, UUID duplicado entre nós, queda do líder e reentrada via WebSocket.
+
+\subsection*{Validação no Docker Compose e defeitos revelados}
+
+A Tabela~\ref{tab:validacao} reúne os cenários reais executados em contêineres e no navegador (com logs principais de 18/11 em \msg{docs/evidencias/}, além do teste de dois nós derrubados registrado durante a correção de 16/11).
+
+\begin{table}[H]
+\centering
+\small
 \begin{tabularx}{\linewidth}{@{}lX@{}}
 \toprule
-Problema & Escolha e justificativa \\
+\textbf{Cenário} & \textbf{Como foi exercitado e resultado observado} \\
 \midrule
-Ordem de entrega & Cada mensagem recebe a chave (relógio de Lamport, nó de origem)
-e é multicast a todos. Um nó só entrega a menor chave da fila depois do ACK de todos os
-membros. Com canais FIFO, nenhuma mensagem de chave menor pode chegar depois. \\
-Confiabilidade & Canal FIFO por destino: o mesmo pacote é repetido após timeout,
-falha de conexão ou HTTP 5xx, e o seguinte não passa à frente. O receptor deduplica
-pelo \msg{pacote_id} e o histórico, pelo UUID da mensagem. \\
-Detecção de falha & Heartbeat com timeout. O timeout gera apenas suspeita, que pausa
-novos envios; a reorganização é uma etapa separada. \\
-Coordenação & Bully: vence o maior ID vivo. A época $(c, p)$ identifica a visão e
-quem a propôs. O líder administra o grupo, mas não numera as mensagens. \\
-Recuperação & O coordenador propõe a nova visão (\msg{VIEW_PREPARE}); cada
-sobrevivente corta a visão antiga e devolve histórico, pendências e relógio
-(\msg{VIEW_STATE}); o coordenador reconcilia e distribui (\msg{VIEW_INSTALL});
-todos confirmam (\msg{VIEW_READY}) antes da retomada (\msg{VIEW_RESUME}). \\
-Reentrada & O nó que volta pede entrada (\msg{JOIN}); o grupo faz o mesmo corte e
-envia um \msg{SNAPSHOT} com histórico e relógio; todos, inclusive o readmitido,
-confirmam antes da retomada. \\
-Cliente & Cada tentativa tem um UUID gerado no navegador. Tentativas pendentes
-ficam na memória da página e são reenviadas com o mesmo UUID ao reconectar ou
-quando o nó volta a ficar ativo. \\
+Concorrência & 3 clientes WebSocket (um por nó) enviaram 45 mensagens ao mesmo tempo; sequência final e \msg{/historico} idênticos nos três nós. \\
+Retry sem queda & Com \msg{HTTP_TIMEOUT} em 0,5~s, pausamos \msg{no1} por 1~s (\msg{docker pause}); \msg{no2} repetiu 2 envios no \msg{CanalFIFO} e, após o \msg{unpause}, as 10 mensagens chegaram em 0,1~s, sem troca de visão. \\
+Reconexão web & No navegador (\msg{t07}), fechar o WebSocket durante o envio manteve a mensagem pendente; reconectou em $\sim$1~s e reenviou uma vez. Reenviar UUID já entregue retornou \msg{confirmada} sem duplicar. \\
+Queda do líder & Após \msg{stop}/\msg{kill no3}, os nós 1 e 2 elegeram o nó~2 em \msg{(2,2)} entre 4,2 e 5,3~s, preservando o histórico. \\
+Queda de membro & Após \msg{kill} de \msg{no1} ou \msg{no2}, o líder~3 seguiu ativo em \msg{(2,3)} entregando mensagens durante a ausência. \\
+Reentrada & Após \msg{start}, cada um dos 3 nós foi readmitido em 0,7 a 1,4~s após subir (3,4 a 4,0~s contando o início do contêiner), recebendo inclusive o que foi enviado durante a queda. \\
+Um sobrevivente & Após \msg{kill no1 no2}, o nó~3 pausou sem maioria; com \msg{start} de \msg{no2} e depois \msg{no1}, retomou em 2,5~s e 2,8~s com históricos iguais. \\
+Mensagens em trânsito & Exercitado de forma determinística apenas na simulação em memória (inclusive o cenário em que \msg{MSG} e \msg{ACK} retidos no canal ainda chegam após o corte e são descartados). \\
 \bottomrule
 \end{tabularx}
+\caption{Resultados observados nos roteiros do Docker Compose, navegador e simulação.}
+\label{tab:validacao}
+\end{table}
 
-O corte é a decisão central da recuperação. A pausa por suspeita só recusa novos
-envios; o corte acontece ao aceitar o \msg{VIEW_PREPARE}, num único passo síncrono
-em que o nó captura histórico, pendências e relógio e descarta as filas de dados
-da visão antiga. Na reconciliação, o histórico mais longo vira base e as pendências
-que faltam entram pela chave original. Isso é seguro porque, com FIFO e ACK de
-todos, nenhuma pendência nova tem chave menor que a de uma entrega já feita; o
-UUID é conferido antes da ordem para descartar duplicatas já resolvidas. Se essa
-condição falhar, a reconciliação para com erro em vez de reescrever o que foi
-confirmado. Só no \msg{VIEW_RESUME} cada nó publica aos clientes o sufixo que
-ainda não tinha entregue. Formatos e um exemplo com mensagens em trânsito estão em
-\msg{docs/protocolo.tex}.
+Também reproduzimos o roteiro do \msg{README.md} do zero em uma cópia limpa do repositório com \msg{docker compose build --no-cache} (18~s): subir o cluster, conversar em duas abas, derrubar o líder, trazê-lo de volta e encerrar funcionou sem passos faltando, com cerca de 8 a 10~s somados de espera técnica.
 
-Duas consequências foram aceitas pela simplicidade: a entrega depende do membro
-mais lento, por causa do ACK de todos, e o chat fica pausado durante toda a troca
-de visão.
+\textbf{Defeitos reais encontrados pela validação.} Os testes revelaram sete bugs importantes, todos transformados em testes de regressão: (1) o \msg{CanalFIFO} pulava um pacote após HTTP~\msg{500}; (2) pacotes sem \msg{pacote_id} alteravam fila e relógio antes do~\msg{400}; (3) duplicatas já resolvidas travavam a reconciliação; (4) um nó reiniciado logo após o bootstrap não era detectado; (5) eleições atrasadas podiam pausar uma visão já retomada; (6) quedas duplas travavam o retorno por esperar nós mortos e impedir \msg{JOIN} sem maioria; e (7) o bloqueio de pool do DNS no Docker.
 
-A resolução de nomes virou uma decisão de projeto depois de um defeito encontrado
-na validação (seção~\ref{sec:validacao}). No Docker, resolver o nome de um
-contêiner parado leva cerca de 4 s. Como cada heartbeat ao nó caído resolvia o
-nome de novo, as buscas presas lotavam o pool de resolução (4 threads no
-\msg{uvloop}), e as mensagens de controle para os nós vivos estouravam o tempo.
-O transporte passou a guardar o último IP de cada nó e a fazer no máximo uma
-busca por vez por nó, renovada após falha de conexão ou a cada 10 s.
+\subsection*{Limitações conhecidas}
 
-\section{Consistência e disponibilidade}
-A consistência oferecida é a mesma ordem total de entrega para todos os clientes,
-com o histórico anterior preservado como prefixo depois de cada troca de visão.
-Não é linearizabilidade: a ordem segue as chaves de Lamport, não o tempo real
-em que cada cliente apertou Enviar.
+Cinco limitações permanecem abertas no escopo atual: (i) congelar um nó por cerca de 2~s gerou suspeita mútua entre os nós 1 e 2; como nenhum era coordenador e suspeitas não expiram sozinhas quando o heartbeat volta, ambos ficaram pausados mesmo íntegros; (ii) uma nova falha após a coleta de estados durante uma transição paralisa o grupo; (iii) o estado em RAM faz com que o bootstrap exija os 3 nós, reiniciar todos apague o histórico e \msg{_processados} cresça sem limite; (iv) recarregar a página no navegador descarta pendências locais e o painel tem atraso de até 1,5~s por usar polling em \msg{/estado}; e (v) mensagens em trânsito durante quedas foram testadas só em simulação, partições não foram exercitadas e os tempos medidos não constituem garantias rígidas.
 
-Diante de falhas, o sistema prioriza \emph{consistência sobre disponibilidade}.
-Durante suspeita, eleição e troca de visão, novos envios são recusados; no
-Compose, essa janela foi de 4 a 6 s entre a parada do líder e a nova visão ativa.
-Com um único nó vivo, o chat fica pausado até outro voltar e formar maioria.
-Um nó isolado não aceita mensagens que depois teriam de ser reconciliadas com
-uma ordem diferente.
+\section{Uso de IA e Referências}
 
-A exigência de maioria teve efeito prático observado. No defeito de DNS descrito
-acima, o nó 1 deixou de ouvir o nó 2 e se declarou coordenador sozinho, enquanto
-o nó 2 também se considerava coordenador. Como cada proposta exige a maioria e o
-\msg{VIEW_STATE} de todos os membros propostos, nenhum dos dois instalou uma visão
-própria: o grupo perdeu disponibilidade, mas os históricos não divergiram.
+\textbf{Uso de ferramentas de IA.} Durante o projeto, ferramentas de IA (Codex e Claude / Claude Code) apoiaram o planejamento inicial, a discussão das hipóteses do protocolo, a escrita e depuração de módulos e testes a partir de especificações do grupo (transporte FIFO, validação de pacotes, reorganização, reentrada e scripts de Docker) e a redação deste relatório. A definição dos requisitos, os ensaios experimentais no Compose e a revisão crítica e apropriação final da solução pertencem ao grupo.
 
-Isso não basta para classificar o sistema como CP no sentido de Gilbert e Lynch.
-Partições não foram implementadas como cenário nem testadas, e o detector de
-falhas por timeout pode errar: uma suspeita falsa entre membros comuns hoje deixa
-os nós pausados (seção~\ref{sec:limitacoes}). Dentro do cenário suportado, a
-escolha é preservar o estado confirmado e aceitar indisponibilidade temporária.
-
-\section{Validação e resultados}\label{sec:validacao}
-A validação combinou testes automáticos, executados no estágio de testes do
-Docker, e roteiros no Docker Compose com HTTP, WebSocket e DNS reais. A saída de
-cada roteiro está em \msg{docs/evidencias/}.
-
-\begin{tabularx}{\linewidth}{@{}lX@{}}
-\toprule
-Cenário & Resultado observado (18/11, Docker Desktop) \\
-\midrule
-Concorrência & Três clientes, um por nó, enviaram 45 mensagens ao mesmo tempo e
-receberam a mesma sequência; \msg{/historico} igual nos três nós. \\
-Retry & Com o nó 1 congelado por 1 s (\msg{docker pause}), o nó 2 repetiu 2 envios
-que estouraram o tempo; as 10 mensagens chegaram uma vez cada, na mesma ordem, sem
-troca de visão. \\
-Reconexão & Uma tentativa feita com a conexão caindo ficou pendente e foi reenviada
-uma vez, com o mesmo UUID, após a reconexão. Reenviar um UUID já entregue recebeu
-\msg{confirmada} e deixou uma cópia em cada nó. \\
-Queda do líder & Após \msg{stop no3}, os nós 1 e 2 elegeram o nó 2 e ficaram ativos
-na época $(2,2)$ de 4,2 a 5,3 s depois, com o histórico preservado e o chat
-aceitando mensagens. \\
-Queda de membro & Após \msg{kill} do nó 1 ou do nó 2, os outros dois retomaram com
-histórico preservado e entregaram mensagens durante a ausência. \\
-Reentrada & Após \msg{start}, cada nó foi readmitido em 0,7 a 1,4 s (4,0 s contando o
-início do contêiner), com o histórico completo, inclusive o enviado na ausência. \\
-Mensagens em trânsito & Exercitado só na simulação: a troca de visão preservou o
-prefixo e incluiu as pendências pela chave original. \\
-Um sobrevivente & Com dois nós caídos, o restante ficou pausado; ao voltar um nó,
-os dois formaram maioria e retomaram com o histórico. \\
-\bottomrule
-\end{tabularx}
-
-\textbf{Testes automáticos.} A suíte tem 404 testes, todos aprovados no contêiner
-de testes com Python 3.13. Ela inclui uma rede simulada em memória que intercala
-canais ao acaso e repete pacotes, com 200 sementes nas quais os três nós entregaram
-a mesma sequência; o canal FIFO real com respostas HTTP controladas (500, 503,
-timeout, resposta perdida e recusa permanente); 37 pacotes malformados recusados
-sem efeito no estado; quedas do líder e de membros com controles perdidos ou
-repetidos; reentrada dos três nós; e integração com três processos reais.
-
-\textbf{Defeitos encontrados pela validação.} Cada um ganhou um teste de regressão
-que falhava antes da correção:
+\textbf{Referências.}
 \begin{itemize}
-\item o canal FIFO abandonava um pacote após HTTP 500 e enviava o seguinte;
-\item um pacote sem \msg{pacote_id} alterava fila e relógio antes de ser recusado;
-\item uma duplicata já resolvida bloqueava a reconciliação;
-\item um nó reiniciado logo após o bootstrap não era percebido como reiniciado;
-\item uma eleição da época anterior podia pausar uma visão já retomada;
-\item depois de duas quedas seguidas, o nó que voltava não era admitido;
-\item no Docker, a resolução de DNS do nó parado bloqueava as mensagens de controle,
-e o nó 1 se elegia sem maioria. Esse defeito não aparecia nos testes, que usam
-\msg{127.0.0.1}, só no Compose.
+\item Enunciado do professor: \emph{Trabalho Final -- Sistemas Distribuídos 2026}.
+\item L. Lamport. \emph{Time, Clocks, and the Ordering of Events in a Distributed System}. CACM, 1978 (\href{https://lamport.azurewebsites.net/pubs/time-clocks.pdf}{PDF}).
+\item H. Garcia-Molina. \emph{Elections in a Distributed Computing System}. IEEE Trans. Computers, 1982 (\href{https://homepage.cs.uiowa.edu/~ghosh/Bully.pdf}{PDF}).
+\item R. Van Renesse, K. Birman, S. Maffeis. \emph{Horus: A Flexible Group Communication System} -- mudança de visão (\href{https://www.cs.cornell.edu/home/rvr/papers/podc/node7.html}{artigo}).
+\item S. Gilbert, N. Lynch. \emph{Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services}. ACM SIGACT News, 2002 (\href{https://groups.csail.mit.edu/tds/papers/Gilbert/Brewer2.pdf}{PDF}).
 \end{itemize}
 
-\textbf{Reprodução.} O roteiro do README foi seguido do zero, numa cópia limpa do
-projeto e com imagens construídas sem cache: subir os três nós, abrir dois
-clientes, conversar, derrubar o líder, trazer o nó de volta e encerrar, sem passos
-faltando. A espera técnica somada na demonstração é de cerca de 10 s.
-
-\section{Limitações}\label{sec:limitacoes}
-\begin{itemize}
-\item \textbf{Suspeita falsa sem volta.} Congelar um nó por cerca de 2 s fez os nós 1
-e 2 suspeitarem um do outro. Como nenhum deles era o coordenador, ninguém propôs
-nova visão, e a suspeita não é desfeita quando o heartbeat volta: os dois ficaram
-pausados, mesmo com o grupo íntegro.
-\item \textbf{Falhas durante uma transição.} Uma nova queda depois da coleta,
-inclusive do coordenador, deixa os nós pausados.
-\item \textbf{Estado só em memória.} O bootstrap exige os três nós; reiniciar todos
-perde o histórico; os identificadores de pacotes processados crescem sem limite.
-\item \textbf{Cliente.} Recarregar a página descarta as tentativas pendentes; o
-painel pode mostrar uma mudança com até 1,5 s de atraso.
-\item \textbf{Escopo da validação.} Mensagens em trânsito no momento da queda e
-partições foram exercitadas só na simulação ou não foram testadas; os tempos
-medidos são observações em uma máquina, não prazos garantidos.
-\end{itemize}
-
-\section{Uso de IA}
-Até esta versão, ferramentas de IA auxiliaram o planejamento, a revisão das
-hipóteses do protocolo e a elaboração dos esboços de documentação.
-O plano foi discutido com Codex e revisado com apoio de Claude.
-As correções de 6/11 no canal FIFO e na validação de pacotes, com seus testes,
-foram escritas com Claude Code a partir de um briefing do grupo; a revisão
-humana dessas correções está pendente. A implementação da T05 (reorganização,
-reconciliação, testes e roteiro de validação no Compose) também foi escrita com
-Claude Code a partir de um briefing do grupo, com revisão humana pendente.
-Este registro deve ser atualizado com os usos posteriores e a revisão humana
-realizada pelo grupo. Os integrantes precisam compreender e explicar a solução.
-Em 11/11, Codex auxiliou a análise dos commits e implementou a T06, seus testes,
-o estágio Docker de testes e o roteiro Compose de queda e retorno, além de
-corrigir uma eleição antiga que podia pausar uma visão já retomada.
-A revisão humana dessas alterações continua pendente.
-
-\section*{Referências}
-Enunciado do professor: Trabalho Final -- Sistemas Distribuídos 2026.
-\href{https://lamport.azurewebsites.net/pubs/time-clocks.pdf}{Lamport (1978)};
-\href{https://homepage.cs.uiowa.edu/~ghosh/Bully.pdf}{Garcia-Molina (1982)};
-\href{https://www.cs.cornell.edu/home/rvr/papers/podc/node7.html}{Van Renesse et al.,
-comunicação e mudança de visão};
-\href{https://groups.csail.mit.edu/tds/papers/Gilbert/Brewer2.pdf}{Gilbert e Lynch,
-Perspectives on the CAP Theorem}.
 \end{document}
